@@ -1,5 +1,8 @@
 # ジェンキンス — 汎用コード作成エージェント (LLMHIB_CODE)
 
+[![build-check](https://github.com/Nemosoft1963/llmhib-code/actions/workflows/ci.yml/badge.svg)](https://github.com/Nemosoft1963/llmhib-code/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 Docker上で動く汎用コード作成エージェントです。タスクを投げると、エージェントが
 **プロジェクト**(独立した作業フォルダ)配下にコードを作成・編集し、必要なら `pytest` や
 `pip install` 等で動作確認まで行います。Cline に近い体験を目指し、**write_file /
@@ -12,6 +15,19 @@ gitチェックポイントとして自動記録・差分確認・ロールバ�
 xAI Grok API(既定 `grok-4.6`)にもリクエスト単位で切り替え可能です(モデルはそれぞれ
 `OPENAI_MODEL`/`GEMINI_MODEL`/`XAI_MODEL`で変更可)。Meta Llama API(`"backend": "meta"`、`LLAMA_API_KEY`と`LLAMA_MODEL`を.envに設定)にも
 切り替え可能です(OpenAI互換エンドポイント経由。自動引き継ぎの候補には含めていません)。
+
+## 目次
+
+- [構成](#構成)
+- [モデル選定について(重要な検証結果)](#モデル選定について重要な検証結果)
+- [セットアップ](#セットアップ)
+- [プロジェクト](#プロジェクト)
+- [Web UI(チャット形式・承認・チェックポイント対応)](#web-uiチャット形式承認チェックポイント対応)
+- [API](#api)
+- [安全上の制約](#安全上の制約)
+- [MCPサーバー連携](#mcpサーバー連携)
+- [ログ・デバッグ](#ログデバッグ)
+- [貢献・ライセンス](#貢献ライセンス)
 
 ## 構成
 
@@ -403,3 +419,12 @@ MCPツールは `mcp_<サーバー名>_<ツール名>`(例: `mcp_duckduckgo_sear
 docker compose logs -f
 docker compose logs -f ollama
 ```
+
+## 貢献・ライセンス
+
+- 不具合報告・機能要望は [Issue](https://github.com/Nemosoft1963/llmhib-code/issues) から。
+  開発手順・PRの出し方は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+- 参加にあたっては [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) に同意してください。
+- 脆弱性は公開Issueにせず、[Security Advisory](https://github.com/Nemosoft1963/llmhib-code/security/advisories/new)
+  から報告してください。信頼境界・秘密情報の扱いは [SECURITY.md](SECURITY.md) を参照。
+- ライセンスは [Apache License 2.0](LICENSE) です。
