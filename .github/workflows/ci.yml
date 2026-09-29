@@ -19,10 +19,13 @@ jobs:
       - name: Byte-compile all Python sources
         run: python -m py_compile $(find src -name '*.py')
       - name: Import check (no side effects at import time)
-        run: python -c "import ast, pathlib
-for p in pathlib.Path('src').rglob('*.py'):
-    ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
-print('OK: all src/*.py parse as valid Python')"
+        run: |
+          python -c "
+          import ast, pathlib
+          for p in pathlib.Path('src').rglob('*.py'):
+              ast.parse(p.read_text(encoding='utf-8'), filename=str(p))
+          print('OK: all src/*.py parse as valid Python')
+          "
 
   docker-build:
     runs-on: ubuntu-latest
