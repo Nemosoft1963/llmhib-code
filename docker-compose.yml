@@ -1,0 +1,61 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: llmhib-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # モデルの重みはDocker管理のnamed volumeに保存(NAS共有へのbind mountは
+      # 書き込みが反映されないことを確認済みのため使わない)
+      - ollama_data:/root/.ollama
+    environment:
+      # 既定5分だと、14GB級の大型モデル(devstral:24b等)の初回ロードで
+      # ディスクI/Oがボトルネックになりタイムアウトすることを確認したため延長
+      - OLLAMA_LOAD_TIMEOUT=15m
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  code-agent:
+    build: .
+    container_name: llmhib-code-agent
+    depends_on:
+      - ollama
+    ports:
+      # ホスト側8000番は別コンテナ(local-cowork-computer)、8010番も別コンテナ
+      # (local-cowork-google-publisher-browser)、8011番も別コンテナ(nenkyuuman-app-1)が使用中のため8012を使用
+      - "8012:8000"
+    env_file:
+      - .env
+    volumes:
+      # 注意: このプロジェクトはネットワークドライブ(Z:\...)上にあり、
+      # Docker Desktopがホストのbind mountで書き込んだ内容を実体のNAS共有に
+      # 反映できないことを確認済み(コンテナ内からの書き込みが消える)。
+      # そのため named volume で永続化する。生成物をホスト側(workspace/)に
+      # 取り出す場合は `docker compose cp code-agent:/app/workspace/. ./workspace`
+      # を使うこと(README参照)。
+      - workspace_data:/app/workspace
+      # 「デプロイ&動作テスト」機能(/projects/{name}/deploy)専用。ホストのDockerデーモンを
+      # 操作できるようにする(コンテナ内のdocker CLI→このソケット→ホストのdockerd)。
+      # 注意: LLMのチャット経由でdockerを実行できるわけではない(run_commandのアローリストに
+      # dockerは無い)。あくまでUIの固定ボタンから呼ばれる、コピー→ビルド→テスト→起動→動作確認の
+      # 決め打ち手順の中だけで使われる。強い権限をコンテナに与えるトレードオフを理解した上で有効化。
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WORKSPACE_ROOT=/app/workspace
+      - IMPORT_HOST_ROOT=${IMPORT_HOST_ROOT:-Z:/AI_Automater}
+      # 既定バックエンド: ローカルLLM(Ollama)。リクエストごとに "backend": "claude" で
+      # Claude APIに切り替えることも可能(.envにANTHROPIC_API_KEYが必要)。
+      - LLM_BACKEND=${LLM_BACKEND:-ollama}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+    restart: unless-stopped
+
+volumes:
+  workspace_data:
+  ollama_data:

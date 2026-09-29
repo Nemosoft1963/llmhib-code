@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ジェンキンス</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f8;
+    --panel: #ffffff;
+    --border: #e2e2e6;
+    --text: #1c1c1f;
+    --muted: #6b6b76;
+    --accent: #4f46e5;
+    --accent-text: #ffffff;
+    --error: #c0341d;
+    --ok: #1a7f37;
+    --warn: #9a6700;
+    --mono-bg: #f0f0f3;
+    --user-bg: #4f46e5;
+    --user-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a;
+      --panel: #1f1f24;
+      --border: #33333a;
+      --text: #ececee;
+      --muted: #9a9aa2;
+      --accent: #7c7ff5;
+      --accent-text: #10101a;
+      --ok: #4ac26b;
+      --warn: #d7a13b;
+      --mono-bg: #101014;
+      --user-bg: #3a3a86;
+      --user-text: #ffffff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN",
+      "Yu Gothic", sans-serif;
+    line-height: 1.55;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    padding: 14px 24px 10px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.2rem; }
+  header p { margin: 0; color: var(--muted); font-size: 0.8rem; }
+
+  .project-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 24px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    flex: none;
+  }
+  .project-bar select {
+    width: auto;
+    min-width: 160px;
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .project-bar input[type="text"] {
+    padding: 6px 8px;
+    font-size: 0.85rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .project-bar button { padding: 6px 12px; font-size: 0.8rem; }
+  #newProjectForm.active { display: inline-flex !important; }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px 24px;
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    min-height: 0;
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    body { height: auto; }
+  }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 12px;
+    font-size: 0.95rem;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  label { display: block; font-size: 0.85rem; color: var(--muted); margin: 0 0 4px; }
+  textarea, select, input[type="number"] {
+    width: 100%;
+    font: inherit;
+    font-size: 0.9rem;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+  .check-row input { width: auto; }
+  button {
+    padding: 9px 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex: none;
+  }
+  button.secondary {
+    background: var(--mono-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.danger { background: var(--error); color: #fff; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  .status {
+    font-size: 0.8rem;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 1.2em;
+  }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: none;
+    flex: none;
+  }
+  .spinner.active { display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .meta-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge {
+    font-size: 0.72rem;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: var(--mono-bg);
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .badge.error { color: var(--error); border-color: var(--error); }
+  .badge.warn { color: var(--warn); border-color: var(--warn); }
+
+  /* --- チャットパネル --- */
+  #chatPanel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    flex: 1;
+    padding: 12px;
+  }
+  #chatSettings {
+    display: none;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--mono-bg);
+  }
+  #chatSettings.active { display: flex; }
+  #chatSettings > div { flex: 1; min-width: 140px; }
+  #chatSettingsToggle {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 2px 0;
+    text-align: left;
+    margin-bottom: 6px;
+  }
+  #chatLog {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 4px 2px 8px;
+  }
+  #chatEmpty { color: var(--muted); font-size: 0.85rem; text-align: center; margin-top: 24px; }
+  .chat-row { display: flex; }
+  .chat-row.chat-user { justify-content: flex-end; }
+  .chat-row.chat-agent { justify-content: flex-start; }
+  .chat-bubble {
+    max-width: 88%;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 0.88rem;
+  }
+  .chat-user .chat-bubble {
+    background: var(--user-bg);
+    color: var(--user-text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .chat-agent .chat-bubble {
+    background: var(--mono-bg);
+    border: 1px solid var(--border);
+    width: 100%;
+  }
+  .step { margin-top: 8px; font-size: 0.85rem; }
+  .step:first-child { margin-top: 0; }
+  .step .step-label { font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+  .step.checkpoint .step-label { color: var(--ok); }
+  .step-text { white-space: pre-wrap; word-break: break-word; }
+  .step pre {
+    margin: 4px 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.78rem;
+    background: var(--panel);
+    padding: 8px;
+    border-radius: 4px;
+  }
+  .step-tool summary { cursor: pointer; }
+
+  .approval-box {
+    margin-top: 10px;
+    border: 1px solid var(--warn);
+    border-radius: 8px;
+    padding: 12px;
+    background: color-mix(in srgb, var(--warn) 12%, var(--panel));
+  }
+  .approval-box h3 { margin: 0 0 8px; font-size: 0.85rem; color: var(--warn); }
+  .approval-call {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-top: 8px;
+    background: var(--panel);
+  }
+  .approval-call .name { font-weight: 600; font-size: 0.85rem; }
+  .approval-call pre {
+    margin: 6px 0 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.78rem;
+    background: var(--mono-bg);
+    padding: 8px;
+    border-radius: 4px;
+  }
+  .approval-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+  #chatInputRow {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-top: 10px;
+    flex: none;
+  }
+  #chatInput {
+    flex: 1;
+    min-height: 44px;
+    max-height: 160px;
+    resize: vertical;
+  }
+
+  /* --- 右カラム: ファイル/チェックポイント --- */
+  #fileList, #checkpointList { list-style: none; margin: 0; padding: 0; font-size: 0.85rem; }
+  #fileList li {
+    padding: 6px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  #fileList li:hover { background: var(--mono-bg); }
+  #fileEmpty, #checkpointEmpty { color: var(--muted); font-size: 0.85rem; }
+  #fileViewer { margin-top: 10px; display: none; }
+  #fileViewer.active { display: block; }
+  #fileViewerName {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  #fileViewerContent, #checkpointDiffContent {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.78rem;
+    background: var(--mono-bg);
+    padding: 10px;
+    border-radius: 6px;
+    max-height: 320px;
+    overflow: auto;
+  }
+  .refresh-link {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 0;
+    margin: 0 0 8px;
+  }
+  .checkpoint-item {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 0.8rem;
+  }
+  .checkpoint-item .cp-msg { font-weight: 600; margin-bottom: 4px; }
+  .checkpoint-item .cp-meta { color: var(--muted); font-size: 0.72rem; margin-bottom: 6px; }
+  .checkpoint-item .cp-actions { display: flex; gap: 6px; }
+  .checkpoint-item .cp-actions button { padding: 4px 10px; font-size: 0.75rem; }
+  #checkpointDiff { margin-top: 10px; display: none; }
+  #checkpointDiff.active { display: block; }
+  #filesCheckpointsCol { overflow-y: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ジェンキンス <small style="font-size:0.5em;font-weight:normal">汎用コード作成エージェント</small></h1>
+  <p>ローカルLLM(Ollama)・Claude・OpenAI・Gemini・Grok・Meta Llamaのいずれかとチャット形式でやり取りしながら、プロジェクトのファイルを作成・実行します。</p>
+</header>
+
+<div class="project-bar">
+  <label for="projectSelect" style="margin:0; white-space:nowrap;">プロジェクト:</label>
+  <select id="projectSelect"></select>
+  <button type="button" class="secondary" id="newProjectToggle">＋ 新規作成</button>
+  <span id="newProjectForm" style="display:none; gap:6px; align-items:center;">
+    <input type="text" id="newProjectName" placeholder="例: myapp、経理システム" style="width:180px;" />
+    <button type="button" id="newProjectCreate">作成</button>
+  </span>
+  <button type="button" class="secondary" id="newChatBtn" title="このプロジェクトで新しい会話を始める">↺ 新しい会話</button>
+  <button type="button" class="secondary" id="exportToggle">📤 エクスポート</button>
+  <button type="button" class="secondary" id="deployBtn" title="Dockerfileがあるプロジェクトを、コピー→ビルド→テスト→起動→動作確認まで実行します">🚀 デプロイ&amp;動作テスト</button>
+  <span id="projectError" style="color:var(--error); font-size:0.8rem;"></span>
+</div>
+<div id="deployResultBox" style="display:none; padding:8px 24px; background:var(--mono-bg); border-bottom:1px solid var(--border);">
+  <div style="font-size:0.75rem; color:var(--muted); margin-bottom:4px;">デプロイ&amp;動作テストの結果(①コピー→②ビルド→③テスト→④起動→⑤動作確認 の順に必ず実行します):</div>
+  <pre id="deployResultContent" style="margin:0; white-space:pre-wrap; word-break:break-all; font-size:0.78rem;"></pre>
+</div>
+
+<div id="exportPanel" class="project-bar" style="display:none; border-top:none;">
+  <label for="exportPathInput" style="margin:0; white-space:nowrap;">エクスポート先:</label>
+  <input type="text" id="exportPathInput" placeholder="例: C:\Users\you\Desktop\output" style="width:280px;" />
+  <button type="button" id="exportPathSave">保存</button>
+  <button type="button" class="secondary" id="exportCommandShow">コマンドを表示</button>
+  <span id="exportError" style="color:var(--error); font-size:0.8rem;"></span>
+</div>
+<div id="exportCommandBox" style="display:none; padding:8px 24px; background:var(--mono-bg); border-bottom:1px solid var(--border);">
+  <div style="font-size:0.75rem; color:var(--muted); margin-bottom:4px;">このコマンドをホスト側のターミナル(docker-compose.ymlがあるディレクトリ)で実行してください:</div>
+  <pre id="exportCommandText" style="margin:0; white-space:pre-wrap; word-break:break-all; font-size:0.78rem;"></pre>
+</div>
+
+<main>
+  <div class="col">
+    <section class="panel" id="chatPanel">
+      <div id="implementerBadge" style="display:none; margin-bottom:8px; padding:6px 10px; background:var(--mono-bg); border:1px solid var(--border); border-radius:6px; font-size:0.8rem;">
+        🤖 コード生成担当AI: <strong id="implementerBadgeText">-</strong>
+      </div>
+      <button type="button" id="chatSettingsToggle">⚙ 実行設定を表示</button>
+      <div id="chatSettings">
+        <div>
+          <label for="backend">バックエンド</label>
+          <select id="backend">
+            <option value="">既定(サーバー設定に従う)</option>
+            <option value="ollama">ollama(ローカルLLM)</option>
+            <option value="claude">claude(Claude API)</option>
+            <option value="openai">openai(ChatGPT API)</option>
+            <option value="gemini">gemini(Gemini API)</option>
+            <option value="grok" selected>grok(xAI Grok API)</option>
+            <option value="meta">meta(Meta Llama API)</option>
+          </select>
+        </div>
+        <div>
+          <label for="maxIterations">最大ループ回数</label>
+          <input id="maxIterations" type="number" min="1" max="50" value="20" />
+        </div>
+        <div class="check-row" style="flex-basis:100%;">
+          <input type="checkbox" id="requireApproval" checked />
+          <label for="requireApproval" style="margin:0;">write_file / edit_file / run_command の実行前に承認を求める</label>
+        </div>
+        <div class="check-row" style="flex-basis:100%;">
+          <input type="checkbox" id="elaborateCheck" />
+          <label for="elaborateCheck" style="margin:0;" title="曖昧な一行の依頼を、実装担当のAIへ渡す前にローカルLLM(Ollama)で具体的な指示文に書き直します">
+            指示をローカルLLMで具体化してから実装担当のAIへ渡す
+          </label>
+        </div>
+      </div>
+
+      <div id="chatLog">
+        <p id="chatEmpty">プロジェクトを選び、下の入力欄から指示を送ってください。<br>完了したら続けて次の指示を送れます(会話の文脈は保持されます)。</p>
+      </div>
+
+      <div id="approvalBox" class="approval-box" style="display:none;">
+        <h3>⚠ 承認待ちの操作があります</h3>
+        <div id="approvalCalls"></div>
+        <div class="approval-actions">
+          <button id="approveAllBtn" type="button">すべて承認して続行</button>
+          <button id="rejectAllBtn" type="button" class="danger">すべて却下</button>
+        </div>
+      </div>
+
+      <div class="status">
+        <span class="spinner" id="spinner"></span>
+        <span id="statusText"></span>
+      </div>
+
+      <form id="chatForm" style="display:flex; flex-direction:column;">
+        <div id="chatInputRow">
+          <textarea id="chatInput" placeholder="指示を入力(例: fizzbuzz.pyを作成して実行して)" required></textarea>
+          <button id="submitBtn" type="submit">送信</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div class="col" id="filesCheckpointsCol">
+    <section class="panel">
+      <h2>プロジェクトのファイル</h2>
+      <button class="refresh-link" id="refreshFiles" type="button">↻ 一覧を更新</button>
+      <ul id="fileList"></ul>
+      <p id="fileEmpty">まだファイルがありません。</p>
+      <div id="fileViewer">
+        <div id="fileViewerName"></div>
+        <div id="fileViewerContent"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>チェックポイント</h2>
+      <button class="refresh-link" id="refreshCheckpoints" type="button">↻ 一覧を更新</button>
+      <div id="checkpointList"></div>
+      <p id="checkpointEmpty">チェックポイントはまだありません。</p>
+      <div id="checkpointDiff">
+        <div id="fileViewerNameCp" style="font-family:ui-monospace,monospace;font-size:0.78rem;color:var(--muted);margin-bottom:6px;"></div>
+        <div id="checkpointDiffContent"></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
+const submitBtn = document.getElementById('submitBtn');
+const spinner = document.getElementById('spinner');
+const statusText = document.getElementById('statusText');
+const chatLog = document.getElementById('chatLog');
+const chatEmpty = document.getElementById('chatEmpty');
+const approvalBox = document.getElementById('approvalBox');
+const approvalCalls = document.getElementById('approvalCalls');
+const approveAllBtn = document.getElementById('approveAllBtn');
+const rejectAllBtn = document.getElementById('rejectAllBtn');
+const newChatBtn = document.getElementById('newChatBtn');
+const chatSettingsToggle = document.getElementById('chatSettingsToggle');
+const implementerBadge = document.getElementById('implementerBadge');
+const implementerBadgeText = document.getElementById('implementerBadgeText');
+const chatSettings = document.getElementById('chatSettings');
+
+const fileListEl = document.getElementById('fileList');
+const fileEmptyEl = document.getElementById('fileEmpty');
+const fileViewer = document.getElementById('fileViewer');
+const fileViewerName = document.getElementById('fileViewerName');
+const fileViewerContent = document.getElementById('fileViewerContent');
+
+const checkpointListEl = document.getElementById('checkpointList');
+const checkpointEmptyEl = document.getElementById('checkpointEmpty');
+const checkpointDiff = document.getElementById('checkpointDiff');
+const checkpointDiffContent = document.getElementById('checkpointDiffContent');
+const fileViewerNameCp = document.getElementById('fileViewerNameCp');
+
+const projectSelect = document.getElementById('projectSelect');
+const newProjectToggle = document.getElementById('newProjectToggle');
+const newProjectForm = document.getElementById('newProjectForm');
+const newProjectName = document.getElementById('newProjectName');
+const newProjectCreate = document.getElementById('newProjectCreate');
+const projectError = document.getElementById('projectError');
+
+const exportToggle = document.getElementById('exportToggle');
+const exportPanel = document.getElementById('exportPanel');
+const exportPathInput = document.getElementById('exportPathInput');
+const exportPathSave = document.getElementById('exportPathSave');
+const exportCommandShow = document.getElementById('exportCommandShow');
+const exportError = document.getElementById('exportError');
+const exportCommandBox = document.getElementById('exportCommandBox');
+const exportCommandText = document.getElementById('exportCommandText');
+
+const deployBtn = document.getElementById('deployBtn');
+const deployResultBox = document.getElementById('deployResultBox');
+const deployResultContent = document.getElementById('deployResultContent');
+
+let currentSessionId = null;
+let currentProject = 'default';
+let lastStatus = null;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+// --- 実行設定の折りたたみ ---
+
+chatSettingsToggle.addEventListener('click', () => {
+  chatSettings.classList.toggle('active');
+  chatSettingsToggle.textContent = chatSettings.classList.contains('active')
+    ? '⚙ 実行設定を隠す' : '⚙ 実行設定を表示';
+});
+
+// --- プロジェクト ---
+
+function resetChat() {
+  stopPolling();
+  setBusy(false);
+  currentSessionId = null;
+  lastStatus = null;
+  chatLog.innerHTML = '';
+  chatLog.appendChild(chatEmpty);
+  chatEmpty.style.display = 'block';
+  approvalBox.style.display = 'none';
+  statusText.textContent = '';
+  implementerBadge.style.display = 'none';
+}
+
+async function loadProjects(selectName) {
+  try {
+    const res = await fetch('/projects');
+    const data = await res.json();
+    const projects = data.projects && data.projects.length ? data.projects : ['default'];
+    projectSelect.innerHTML = '';
+    for (const p of projects) {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      projectSelect.appendChild(opt);
+    }
+    const target = selectName && projects.includes(selectName) ? selectName : projects[0];
+    projectSelect.value = target;
+    currentProject = target;
+    resetChat();
+    await Promise.all([loadFiles(), loadCheckpoints()]);
+  } catch (e) {
+    projectError.textContent = 'プロジェクト一覧の取得に失敗しました。';
+  }
+}
+
+projectSelect.addEventListener('change', () => {
+  currentProject = projectSelect.value;
+  fileViewer.classList.remove('active');
+  checkpointDiff.classList.remove('active');
+  exportPanel.style.display = 'none';
+  exportCommandBox.style.display = 'none';
+  deployResultBox.style.display = 'none';
+  resetChat();
+  loadFiles();
+  loadCheckpoints();
+});
+
+newChatBtn.addEventListener('click', () => {
+  if (currentSessionId && !confirm('現在の会話を終了し、新しい会話を始めます。よろしいですか?')) return;
+  resetChat();
+});
+
+// --- エクスポート先設定 ---
+
+async function loadExportPath() {
+  exportCommandBox.style.display = 'none';
+  exportError.textContent = '';
+  try {
+    const res = await fetch('/projects/' + encodeURIComponent(currentProject));
+    const data = await res.json();
+    exportPathInput.value = data.export_path || '';
+  } catch (e) {
+    exportPathInput.value = '';
+  }
+}
+
+exportToggle.addEventListener('click', () => {
+  const showing = exportPanel.style.display !== 'none';
+  exportPanel.style.display = showing ? 'none' : 'flex';
+  if (!showing) loadExportPath();
+});
+
+exportPathSave.addEventListener('click', async () => {
+  const path = exportPathInput.value.trim();
+  exportError.textContent = '';
+  if (!path) return;
+  exportPathSave.disabled = true;
+  try {
+    const res = await fetch('/projects/' + encodeURIComponent(currentProject) + '/export-path', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ export_path: path }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      exportError.textContent = data.detail || '保存に失敗しました。';
+      return;
+    }
+    exportError.textContent = '保存しました。';
+  } catch (e) {
+    exportError.textContent = '通信エラーが発生しました。';
+  } finally {
+    exportPathSave.disabled = false;
+  }
+});
+
+exportCommandShow.addEventListener('click', async () => {
+  exportError.textContent = '';
+  try {
+    const res = await fetch('/projects/' + encodeURIComponent(currentProject) + '/export-command');
+    const data = await res.json();
+    if (!res.ok) {
+      exportError.textContent = data.detail || 'コマンドの取得に失敗しました。';
+      exportCommandBox.style.display = 'none';
+      return;
+    }
+    exportCommandText.textContent = data.command;
+    exportCommandBox.style.display = 'block';
+  } catch (e) {
+    exportError.textContent = '通信エラーが発生しました。';
+  }
+});
+
+newProjectToggle.addEventListener('click', () => {
+  newProjectForm.classList.toggle('active');
+  if (newProjectForm.classList.contains('active')) newProjectName.focus();
+});
+
+newProjectCreate.addEventListener('click', async () => {
+  const name = newProjectName.value.trim();
+  projectError.textContent = '';
+  if (!name) return;
+  newProjectCreate.disabled = true;
+  try {
+    const res = await fetch('/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      projectError.textContent = data.detail || 'プロジェクトの作成に失敗しました。';
+      return;
+    }
+    newProjectName.value = '';
+    newProjectForm.classList.remove('active');
+    await loadProjects(data.project);
+  } catch (e) {
+    projectError.textContent = '通信エラーが発生しました。';
+  } finally {
+    newProjectCreate.disabled = false;
+  }
+});
+
+// --- ファイル一覧 ---
+
+async function loadFiles() {
+  try {
+    const res = await fetch('/files?project=' + encodeURIComponent(currentProject));
+    const data = await res.json();
+    const files = data.files || [];
+    fileListEl.innerHTML = '';
+    fileEmptyEl.style.display = files.length ? 'none' : 'block';
+    for (const f of files) {
+      const li = document.createElement('li');
+      li.textContent = f;
+      li.addEventListener('click', () => showFile(f));
+      fileListEl.appendChild(li);
+    }
+  } catch (e) {
+    fileEmptyEl.textContent = 'ファイル一覧の取得に失敗しました。';
+    fileEmptyEl.style.display = 'block';
+  }
+}
+
+async function showFile(path) {
+  fileViewer.classList.add('active');
+  fileViewerName.textContent = path;
+  fileViewerContent.textContent = '読み込み中...';
+  try {
+    const res = await fetch(
+      '/files/content?path=' + encodeURIComponent(path) + '&project=' + encodeURIComponent(currentProject)
+    );
+    const data = await res.json();
+    fileViewerContent.textContent = data.content;
+  } catch (e) {
+    fileViewerContent.textContent = 'エラー: 取得に失敗しました。';
+  }
+}
+
+document.getElementById('refreshFiles').addEventListener('click', loadFiles);
+
+// --- チェックポイント ---
+
+async function loadCheckpoints() {
+  try {
+    const res = await fetch('/checkpoints?project=' + encodeURIComponent(currentProject));
+    const data = await res.json();
+    const list = data.checkpoints || [];
+    checkpointListEl.innerHTML = '';
+    checkpointEmptyEl.style.display = list.length ? 'none' : 'block';
+    for (const cp of list) {
+      const div = document.createElement('div');
+      div.className = 'checkpoint-item';
+      const date = new Date(cp.timestamp * 1000).toLocaleString('ja-JP');
+      div.innerHTML = `
+        <div class="cp-msg">${escapeHtml(cp.message)}</div>
+        <div class="cp-meta">${escapeHtml(cp.sha.slice(0, 8))} · ${escapeHtml(date)}</div>
+        <div class="cp-actions">
+          <button type="button" class="secondary" data-act="diff" data-sha="${cp.sha}">差分を見る</button>
+          <button type="button" class="danger" data-act="restore" data-sha="${cp.sha}">この状態に戻す</button>
+        </div>
+      `;
+      checkpointListEl.appendChild(div);
+    }
+  } catch (e) {
+    checkpointEmptyEl.textContent = 'チェックポイント一覧の取得に失敗しました。';
+    checkpointEmptyEl.style.display = 'block';
+  }
+}
+
+checkpointListEl.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const sha = btn.dataset.sha;
+  if (btn.dataset.act === 'diff') {
+    checkpointDiff.classList.add('active');
+    fileViewerNameCp.textContent = sha;
+    checkpointDiffContent.textContent = '読み込み中...';
+    try {
+      const res = await fetch(`/checkpoints/${sha}/diff?project=` + encodeURIComponent(currentProject));
+      const data = await res.json();
+      checkpointDiffContent.textContent = data.diff;
+    } catch (e) {
+      checkpointDiffContent.textContent = 'エラー: 取得に失敗しました。';
+    }
+  } else if (btn.dataset.act === 'restore') {
+    if (!confirm('このチェックポイントの状態にプロジェクトを戻します。よろしいですか?\n(現在の状態は復元前として自動保存されます)')) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch(
+        `/checkpoints/${sha}/restore?project=` + encodeURIComponent(currentProject),
+        { method: 'POST' }
+      );
+      if (!res.ok) {
+        const data = await res.json();
+        alert('復元に失敗しました: ' + (data.detail || res.status));
+      } else {
+        await loadFiles();
+        await loadCheckpoints();
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  }
+});
+
+document.getElementById('refreshCheckpoints').addEventListener('click', loadCheckpoints);
+
+// --- チャットの描画 ---
+
+function renderStepElement(item) {
+  const div = document.createElement('div');
+  if (item.type === 'text') {
+    div.className = 'step';
+    div.innerHTML = `<div class="step-text">${escapeHtml(item.text)}</div>`;
+  } else if (item.type === 'tool_use') {
+    div.className = 'step step-tool';
+    const input = JSON.stringify(item.input, null, 2);
+    const badge = item.needs_approval ? ' <span class="badge warn">承認制</span>' : '';
+    div.innerHTML = `
+      <details>
+        <summary class="step-label">🔧 ${escapeHtml(item.name)}${badge}</summary>
+        <pre>${escapeHtml(input)}</pre>
+      </details>
+    `;
+  } else if (item.type === 'checkpoint') {
+    div.className = 'step checkpoint';
+    div.innerHTML = `<div class="step-label">✅ チェックポイント作成 (${escapeHtml(item.sha.slice(0, 8))})</div><div class="step-text">${escapeHtml(item.message)}</div>`;
+  } else if (item.type === 'elaboration') {
+    div.className = 'step step-elaboration';
+    if (item.ok) {
+      div.innerHTML = `
+        <details>
+          <summary class="step-label">📝 ローカルLLMが指示を具体化しました</summary>
+          <div style="font-size:0.78rem; color:var(--muted); margin:4px 0 2px;">具体化後にこの内容で実装が進められます:</div>
+          <pre>${escapeHtml(item.elaborated)}</pre>
+        </details>
+      `;
+    } else {
+      div.innerHTML = `
+        <div class="step-label">⚠ ローカルLLMによる具体化に失敗したため、元の指示のまま実行します</div>
+        <div class="step-text" style="color:var(--muted); font-size:0.78rem;">${escapeHtml(item.error || '')}</div>
+      `;
+    }
+  } else if (item.type === 'handoff') {
+    div.className = 'step step-handoff';
+    div.innerHTML = `
+      <div class="step-label">🔄 担当AIを自動的に切り替えました: ${escapeHtml(item.from_backend)}(${escapeHtml(item.from_model)}) → ${escapeHtml(item.to_backend)}(${escapeHtml(item.to_model)})</div>
+      <div class="step-text" style="color:var(--muted); font-size:0.78rem;">理由: ${escapeHtml(item.reason || '')}</div>
+    `;
+  } else {
+    div.className = 'step';
+    div.innerHTML = `<pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>`;
+  }
+  return div;
+}
+
+function renderChat(transcript) {
+  chatLog.innerHTML = '';
+  let agentBubble = null;
+
+  function ensureAgentBubble() {
+    if (agentBubble) return agentBubble;
+    const row = document.createElement('div');
+    row.className = 'chat-row chat-agent';
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    row.appendChild(bubble);
+    chatLog.appendChild(row);
+    agentBubble = bubble;
+    return bubble;
+  }
+
+  for (const item of (transcript || [])) {
+    if (item.type === 'user_message') {
+      const row = document.createElement('div');
+      row.className = 'chat-row chat-user';
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble';
+      bubble.textContent = item.text;
+      row.appendChild(bubble);
+      chatLog.appendChild(row);
+      agentBubble = null; // 次のエージェント発言用に新しい吹き出しを用意する
+    } else {
+      ensureAgentBubble().appendChild(renderStepElement(item));
+    }
+  }
+
+  chatEmpty.style.display = (transcript || []).length ? 'none' : 'block';
+  if (chatEmpty.style.display === 'block') chatLog.appendChild(chatEmpty);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+// --- デプロイ&動作テスト ---
+
+const DEPLOY_STEP_LABELS = {
+  copy: '① コピー',
+  build: '② ビルド',
+  test: '③ テスト',
+  up: '④ コンテナ起動',
+  smoke_test: '⑤ 動作確認',
+};
+
+function renderDeployResult(data) {
+  deployResultBox.style.display = 'block';
+  const parts = [];
+  parts.push(data.ok ? `✅ デプロイ成功。${data.url} で動作確認できました。` : `❌ ${data.error || 'デプロイに失敗しました'}`);
+  for (const s of (data.steps || [])) {
+    const icon = s.ok === true ? '✅' : s.ok === false ? '❌' : '⏭';
+    parts.push(`${icon} ${DEPLOY_STEP_LABELS[s.step] || s.step} — ${s.label || ''}\n${(s.detail || '').trim()}`);
+  }
+  deployResultContent.textContent = parts.join('\n\n');
+  deployResultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function runDeploy(triggerBtn) {
+  if (!currentProject) return;
+  const original = triggerBtn.textContent;
+  triggerBtn.disabled = true;
+  triggerBtn.textContent = '⏳ 実行中(ビルド・テストのため数十秒〜数分かかります)…';
+  deployResultBox.style.display = 'block';
+  deployResultContent.textContent = '①コピー→②ビルド→③テスト→④起動→⑤動作確認 を実行しています…';
+  try {
+    const res = await fetch(`/projects/${encodeURIComponent(currentProject)}/deploy`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      deployResultContent.textContent = `❌ エラー (HTTP ${res.status}): ${data.detail || ''}`;
+      return;
+    }
+    renderDeployResult(data);
+  } catch (e) {
+    deployResultContent.textContent = `❌ 通信エラー: ${escapeHtml(String(e))}`;
+  } finally {
+    triggerBtn.disabled = false;
+    triggerBtn.textContent = original;
+  }
+}
+
+deployBtn.addEventListener('click', () => runDeploy(deployBtn));
+
+function maybeShowInlineDeployPrompt() {
+  // AIの修正作業が完了した直後、その場で「デプロイして動作確認する」を選べるようにする
+  // (自動実行はしない。本番コンテナの入れ替えという外部影響のある操作のため、
+  //  ひと目で押せる場所に置きつつ、実行はユーザーの明示的なクリックに委ねる)。
+  const rows = chatLog.querySelectorAll('.chat-row.chat-agent');
+  const lastRow = rows[rows.length - 1];
+  if (!lastRow) return;
+  const bubble = lastRow.querySelector('.chat-bubble');
+  if (!bubble || bubble.querySelector('.inline-deploy-btn')) return;
+  const wrap = document.createElement('div');
+  wrap.style.marginTop = '8px';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'inline-deploy-btn';
+  btn.textContent = '🚀 この内容をデプロイして動作確認する';
+  btn.addEventListener('click', () => runDeploy(btn));
+  wrap.appendChild(btn);
+  bubble.appendChild(wrap);
+}
+
+function renderApproval(data) {
+  const pending = data.pending || [];
+  if (data.status !== 'waiting_approval' || pending.length === 0) {
+    approvalBox.style.display = 'none';
+    approvalCalls.innerHTML = '';
+    return;
+  }
+  approvalBox.style.display = 'block';
+  approvalCalls.innerHTML = '';
+  for (const call of pending) {
+    const div = document.createElement('div');
+    div.className = 'approval-call';
+    div.innerHTML = `
+      <div class="name">🔧 ${escapeHtml(call.name)}</div>
+      <pre>${escapeHtml(JSON.stringify(call.args, null, 2))}</pre>
+    `;
+    approvalCalls.appendChild(div);
+  }
+}
+
+function setBusy(busy) {
+  submitBtn.disabled = busy;
+  chatInput.disabled = busy;
+  approveAllBtn.disabled = busy;
+  rejectAllBtn.disabled = busy;
+  spinner.classList.toggle('active', busy);
+}
+
+// --- 実行中の進捗ポーリング ---
+// バックエンドはstart/continue/decisionを受けるとすぐ"running"を返し、実際の処理は
+// バックグラウンドスレッドで進む。ここではGET /agent/{id}を短い間隔で叩き続け、
+// チャットログ・ステータス表示をリアルタイムに更新する(完了/承認待ち/エラーになったら停止)。
+let pollTimer = null;
+const POLL_INTERVAL_MS = 1200;
+
+function stopPolling() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+async function pollSession(sessionId) {
+  stopPolling();
+  const tick = async () => {
+    try {
+      const res = await fetch(`/agent/${sessionId}`);
+      const data = await res.json();
+      if (!res.ok) {
+        statusText.innerHTML = `<span class="badge error">エラー (HTTP ${res.status}): ${escapeHtml(data.detail || '')}</span>`;
+        setBusy(false);
+        return;
+      }
+      applySessionState(data);
+      if (data.status === 'running') {
+        pollTimer = setTimeout(tick, POLL_INTERVAL_MS);
+      } else {
+        setBusy(false);
+      }
+    } catch (e) {
+      statusText.innerHTML = `<span class="badge error">通信エラー: ${escapeHtml(String(e))}</span>`;
+      setBusy(false);
+    }
+  };
+  await tick();
+}
+
+function describeLastStep(transcript) {
+  const last = (transcript || [])[(transcript || []).length - 1];
+  if (!last) return '';
+  if (last.type === 'tool_use') return `🔧 ${last.name} を実行中`;
+  if (last.type === 'elaboration') return '📝 ローカルLLMが指示を具体化中';
+  if (last.type === 'checkpoint') return '✅ チェックポイントを記録中';
+  if (last.type === 'text') return '💬 応答を生成中';
+  return '';
+}
+
+function applySessionState(data) {
+  currentSessionId = data.session_id;
+  lastStatus = data.status;
+  renderChat(data.transcript);
+  renderApproval(data);
+
+  // コード生成(実装)を実際に担当しているAIを常に表示する。
+  // フロントAI(具体化)とは別物であることが分かるよう明示する。
+  implementerBadge.style.display = 'block';
+  implementerBadgeText.textContent = `${data.backend ?? '-'} (${data.model ?? '-'})`;
+
+  const badges = [
+    `backend: ${data.backend ?? '-'}`,
+    `model: ${data.model ?? '-'}`,
+    `iterations: ${data.iterations ?? '-'}`,
+  ];
+  if (data.status === 'waiting_approval') {
+    statusText.innerHTML = '⚠ 承認待ちです。内容を確認して「すべて承認して続行」または「すべて却下」を押してください。';
+    chatInput.placeholder = '承認待ちです。先に上の操作を承認/却下してください…';
+  } else if (data.status === 'running') {
+    const detail = describeLastStep(data.transcript);
+    statusText.textContent =
+      `実行中です…(${data.iterations ?? 0}/${data.max_iterations ?? '?'}ターン目)` +
+      (detail ? ` ${detail}` : '');
+  } else if (data.status === 'done') {
+    statusText.textContent = data.error ? `完了(${data.error})` : '完了しました。続けて次の指示を送れます。';
+    chatInput.placeholder = '次の指示を入力(例: このコードにテストを追加して)';
+    loadFiles();
+    loadCheckpoints();
+    if (!data.error) maybeShowInlineDeployPrompt();
+  } else if (data.status === 'error') {
+    statusText.innerHTML =
+      `<span class="badge error">エラーが発生しました</span> ${escapeHtml(data.error || '(詳細不明)')}`;
+    loadFiles();
+    loadCheckpoints();
+  }
+}
+
+async function decide(approveAll) {
+  if (!currentSessionId) return;
+  setBusy(true);
+  statusText.textContent = approveAll ? '承認して続行しています…' : '却下して続行しています…';
+  try {
+    const res = await fetch(`/agent/${currentSessionId}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approve_all: approveAll }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      statusText.innerHTML = `<span class="badge error">エラー (HTTP ${res.status}): ${escapeHtml(data.detail || '')}</span>`;
+      setBusy(false);
+      return;
+    }
+    applySessionState(data);
+    if (data.status === 'running') {
+      await pollSession(data.session_id);
+    } else {
+      setBusy(false);
+    }
+  } catch (e) {
+    statusText.innerHTML = `<span class="badge error">通信エラー: ${escapeHtml(String(e))}</span>`;
+    setBusy(false);
+  }
+}
+
+approveAllBtn.addEventListener('click', () => decide(true));
+rejectAllBtn.addEventListener('click', () => decide(false));
+
+chatForm.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const task = chatInput.value.trim();
+  if (!task) return;
+  if (lastStatus === 'waiting_approval') return; // 承認待ち中は送信させない
+
+  const backend = document.getElementById('backend').value;
+  const maxIterations = parseInt(document.getElementById('maxIterations').value, 10) || 20;
+  const requireApproval = document.getElementById('requireApproval').checked;
+  const elaborateFirst = document.getElementById('elaborateCheck').checked;
+
+  setBusy(true);
+  statusText.textContent = '実行中です。ローカルLLMの場合は数十秒〜数分かかることがあります…';
+  chatInput.value = '';
+
+  try {
+    let res, data;
+    let startedFresh = false;
+    if (currentSessionId && (lastStatus === 'done' || lastStatus === 'error')) {
+      // 会話を継続する
+      res = await fetch(`/agent/${currentSessionId}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task, max_iterations: maxIterations }),
+      });
+      if (res.status === 404) {
+        // サーバー再起動等でセッション(メモリ上の会話状態)が失われた場合。
+        // 「止まっている」ように見えるだけで実害は無いので、自動的に新しい会話として送り直す。
+        resetChat();
+        startedFresh = true;
+        const body = { task, project: currentProject, max_iterations: maxIterations, require_approval: requireApproval, elaborate: elaborateFirst };
+        if (backend) body.backend = backend;
+        res = await fetch('/agent/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      }
+    } else {
+      // 新しい会話を始める
+      const body = { task, project: currentProject, max_iterations: maxIterations, require_approval: requireApproval, elaborate: elaborateFirst };
+      if (backend) body.backend = backend;
+      res = await fetch('/agent/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+    data = await res.json();
+
+    if (!res.ok) {
+      statusText.innerHTML = `<span class="badge error">エラー (HTTP ${res.status}): ${escapeHtml(data.detail || '')}</span>`;
+      chatInput.value = task; // 送信できなかった内容を入力欄に戻す
+      setBusy(false);
+      return;
+    }
+
+    applySessionState(data);
+    if (startedFresh) {
+      statusText.innerHTML =
+        '⚠ サーバー再起動等で以前の会話状態が失われていたため、新しい会話として送信しました' +
+        '(ファイル・チェックポイントへの影響はありません)。' + statusText.innerHTML;
+    }
+    if (data.status === 'running') {
+      await pollSession(data.session_id);
+    } else {
+      setBusy(false);
+    }
+  } catch (e) {
+    statusText.innerHTML = `<span class="badge error">通信エラー: ${escapeHtml(String(e))}</span>`;
+    chatInput.value = task;
+    setBusy(false);
+  }
+});
+
+// Enterで送信、Shift+Enterで改行
+chatInput.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter' && !ev.shiftKey) {
+    ev.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
+
+loadProjects();
+</script>
+</body>
+</html>

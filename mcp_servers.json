@@ -1,0 +1,12 @@
+[
+  {
+    "name": "duckduckgo",
+    "command": "uvx",
+    "args": ["duckduckgo-mcp-server"]
+  },
+  {
+    "name": "sqlite",
+    "command": "uvx",
+    "args": ["--with", "mcp<2", "mcp-server-sqlite", "--db-path", "/app/workspace/projects/default/agent.db"]
+  }
+]

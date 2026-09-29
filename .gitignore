@@ -1,0 +1,44 @@
+# 秘密情報
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.kdbx
+id_rsa*
+id_ed25519*
+.netrc
+*credential*
+*secret*
+*.token
+*.keystore
+
+# 実行時データ・生成物(プロジェクトの作業内容は公開しない)
+workspace/
+data/
+backups/
+logs/
+temp/
+tmp/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# その他
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+*.db
+*.sqlite
+*.sqlite3
