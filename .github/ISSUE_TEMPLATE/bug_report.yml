@@ -1,0 +1,50 @@
+name: 不具合報告
+description: 再現可能な不具合を報告します
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        個人情報、認証情報、実際の業務資料は添付しないでください。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 発生した問題
+      description: 実際の結果と期待した結果を記載してください。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 問題を再現できる操作を順番に記載してください。
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: 使用していたバックエンド
+      options:
+        - ollama
+        - claude
+        - openai
+        - gemini
+        - grok
+        - meta
+  - type: input
+    id: version
+    attributes:
+      label: バージョンまたはコミットハッシュ
+  - type: textarea
+    id: environment
+    attributes:
+      label: 実行環境
+      description: OS、Docker Desktop、GPU、ブラウザなど
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 情報確認
+      options:
+        - label: 個人情報、秘密情報、実業務データを含めていません
+          required: true

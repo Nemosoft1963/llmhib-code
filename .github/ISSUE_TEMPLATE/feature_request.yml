@@ -1,0 +1,26 @@
+name: 機能要望
+description: 新しい機能や改善案を提案します
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        解決したい問題と達成条件を中心に記載してください。個人情報や秘密情報は記載しないでください。
+  - type: textarea
+    id: goal
+    attributes:
+      label: 解決したい問題
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 期待する結果・達成条件
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望する方法
+      description: 実装方法が未定でも構いません。
