@@ -120,7 +120,7 @@ class StartRequest(BaseModel):
     project: str = Field(DEFAULT_PROJECT, description="対象プロジェクト名")
     max_iterations: int = Field(20, ge=1, le=50, description="ツール呼び出しループの上限")
     backend: str | None = Field(
-        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta" / "openrouter"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
+        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
     )
     require_approval: bool = Field(
         True, description="write_file / edit_file / run_command の実行前にユーザー承認を求めるか"
@@ -157,7 +157,7 @@ class TaskRequest(BaseModel):
     project: str = Field(DEFAULT_PROJECT, description="対象プロジェクト名")
     max_iterations: int = Field(20, ge=1, le=50, description="ツール呼び出しループの上限")
     backend: str | None = Field(
-        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta" / "openrouter"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
+        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
     )
 
 

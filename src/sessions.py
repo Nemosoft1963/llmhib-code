@@ -297,9 +297,7 @@ def _backend_module(name: str):
     """バックエンド名から、call_model/init_messages/build_tool_result_messages を持つ
     モジュールを返す。call_model系だけ import が重い(clientの生成等)ため遅延import する。
     """
-    from .backends import (
-        claude_step, gemini_step, grok_step, meta_step, ollama_step, openai_step, openrouter_step,
-    )
+    from .backends import claude_step, gemini_step, grok_step, meta_step, ollama_step, openai_step
 
     modules = {
         "claude": claude_step,
@@ -308,11 +306,10 @@ def _backend_module(name: str):
         "gemini": gemini_step,
         "grok": grok_step,
         "meta": meta_step,
-        "openrouter": openrouter_step,
     }
     module = modules.get(name)
     if module is None:
-        raise ValueError(f"未知のbackendです: {name} (ollama, claude, openai, gemini, grok, meta, openrouter のいずれか)")
+        raise ValueError(f"未知のbackendです: {name} (ollama, claude, openai, gemini, grok, meta のいずれか)")
     return module
 
 
@@ -687,7 +684,7 @@ def start_session(
         elaborate=elaborate,
         # 調査モードは指定バックエンドだけで実施する(自動引き継ぎで別のAIへ渡さない)
         tried_backends=(
-            ["claude", "ollama", "openai", "gemini", "grok", "meta", "openrouter"] if read_only else [backend]
+            ["claude", "ollama", "openai", "gemini", "grok", "meta"] if read_only else [backend]
         ),
         read_only=read_only,
         analysis_out=analysis_out,
