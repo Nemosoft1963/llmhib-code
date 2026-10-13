@@ -24,6 +24,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -45,6 +46,17 @@ BUILTIN_APPROVAL_REQUIRED_TOOLS = {"write_file", "edit_file", "run_command"}
 # 開発指示や作業経緯の記録が消える問題があったため、既定を無期限に変更した。
 # 環境変数SESSION_TTL_SECに正の値を設定すれば、その秒数を過ぎた会話を削除する。
 SESSION_TTL_SEC = int(os.environ.get("SESSION_TTL_SEC", "0"))
+
+# metaバックエンドだけ、ツール呼び出し回数の上限を引き上げる(他のバックエンドは
+# リクエストの max_iterations のまま)。引き継ぎ(failover)の判定にだけ効く。
+META_MAX_ITERATIONS = int(os.environ.get("META_MAX_ITERATIONS", "100"))
+
+
+def _iteration_limit(session: "Session") -> int:
+    """現在のバックエンドで許容するツール呼び出し回数の上限。"""
+    if session.backend == "meta":
+        return max(session.max_iterations, META_MAX_ITERATIONS)
+    return session.max_iterations
 
 SessionStatus = Literal["running", "waiting_approval", "done", "error"]
 
@@ -204,6 +216,42 @@ def _cleanup_old_sessions() -> None:
         session_store.delete(sid)
 
 
+# 使い捨て調査・確認スクリプトとみなすプロジェクト直下のファイル名(実運用で乱造が繰り返されたため検知する)
+_SCRATCH_NAME_RE = re.compile(
+    r"^(?:survey|tmp|temp|diag|probe|scratch|explore|scan|cleanup)[A-Za-z0-9_\-]*\.(?:py|sh|js|cjs)$"
+    r"|^(?:check|fix|run)[_-][A-Za-z0-9_\-]*\.(?:py|sh|js|cjs)$"
+    r"|^[A-Za-z0-9_\-]*_tmp\.(?:py|sh|js|cjs)$"
+)
+_SCRATCH_NUDGE_AT = 3
+
+
+def _is_scratch_path(path: Any) -> bool:
+    p = str(path or "").replace("\\", "/").lstrip("./")
+    return "/" not in p and bool(_SCRATCH_NAME_RE.match(p))
+
+
+def _scratch_files_written(session: Session) -> list[str]:
+    """このセッションで write_file された使い捨てスクリプトのパス(重複なし、書いた順)。"""
+    seen: list[str] = []
+    for item in session.transcript:
+        if item.get("type") == "tool_use" and item.get("name") == "write_file":
+            path = str((item.get("input") or {}).get("path") or "")
+            if _is_scratch_path(path) and path not in seen:
+                seen.append(path)
+    return seen
+
+
+def _remaining_scratch_files(session: Session, workspace: Workspace) -> list[str]:
+    out = []
+    for path in _scratch_files_written(session):
+        try:
+            if (workspace.root / path).exists():
+                out.append(path)
+        except Exception:
+            continue
+    return out
+
+
 READ_ONLY_TOOLS = {"read_file", "list_directory"}
 
 
@@ -249,7 +297,9 @@ def _backend_module(name: str):
     """バックエンド名から、call_model/init_messages/build_tool_result_messages を持つ
     モジュールを返す。call_model系だけ import が重い(clientの生成等)ため遅延import する。
     """
-    from .backends import claude_step, gemini_step, grok_step, meta_step, ollama_step, openai_step
+    from .backends import (
+        claude_step, gemini_step, grok_step, meta_step, ollama_step, openai_step, openrouter_step,
+    )
 
     modules = {
         "claude": claude_step,
@@ -258,10 +308,11 @@ def _backend_module(name: str):
         "gemini": gemini_step,
         "grok": grok_step,
         "meta": meta_step,
+        "openrouter": openrouter_step,
     }
     module = modules.get(name)
     if module is None:
-        raise ValueError(f"未知のbackendです: {name} (ollama, claude, openai, gemini, grok, meta のいずれか)")
+        raise ValueError(f"未知のbackendです: {name} (ollama, claude, openai, gemini, grok, meta, openrouter のいずれか)")
     return module
 
 
@@ -275,6 +326,22 @@ def _finalize_turn(session: Session, workspace: Workspace) -> None:
     results = [
         {"id": c.id, "name": c.name, "content": c.result or ""} for c in session.current_turn
     ]
+    # 使い捨てスクリプトの乱造を検知したら、次の判断材料としてモデルに返す結果へ注意を添える。
+    # (拒否はしない: 正当なファイル名と衝突する可能性があるため)
+    scratch = _scratch_files_written(session)
+    if len(scratch) >= _SCRATCH_NUDGE_AT and any(
+        c.name == "write_file" and c.approved and _is_scratch_path(c.args.get("path"))
+        for c in session.current_turn
+    ):
+        for r in results:
+            if r["name"] == "write_file":
+                r["content"] = (
+                    f"{r['content']}\n\n[注意] 調査・確認用とみなせるスクリプトが既に{len(scratch)}個"
+                    f"({', '.join(scratch[-5:])})作られています。これ以上スクリプトを増やさず、"
+                    "read_file で直接読むか、1ファイル(_scratch.py)を上書きして使い、"
+                    "実際のコード変更に着手してください。完了前に一時ファイルは削除してください。"
+                )
+                break
 
     backend = _backend_module(session.backend)
     session.messages.extend(backend.build_tool_result_messages(results))
@@ -305,7 +372,7 @@ def _run_loop(session: Session) -> None:
     workspace = get_workspace(session.project)
 
     while True:
-        if session.iterations >= session.max_iterations:
+        if session.iterations >= _iteration_limit(session):
             if _try_handoff(session, "ツール呼び出し回数の上限(max_iterations)に達しました"):
                 continue
             session.status = "done"
@@ -330,6 +397,13 @@ def _run_loop(session: Session) -> None:
 
         if not tool_calls_raw:
             session.status = "done"
+            leftovers = _remaining_scratch_files(session, workspace)
+            if leftovers:
+                text = (
+                    f"{text}\n\n[ジェンキンス検知] 作業中に作られた一時スクリプトがプロジェクトに"
+                    f"残っています(削除されていません): {', '.join(leftovers)}"
+                )
+                session.transcript.append({"type": "text", "text": f"一時スクリプト残存: {', '.join(leftovers)}"})
             session.final_text = text
             _save_analysis(session, workspace)
             _persist(session)
@@ -613,7 +687,7 @@ def start_session(
         elaborate=elaborate,
         # 調査モードは指定バックエンドだけで実施する(自動引き継ぎで別のAIへ渡さない)
         tried_backends=(
-            ["claude", "ollama", "openai", "gemini", "grok", "meta"] if read_only else [backend]
+            ["claude", "ollama", "openai", "gemini", "grok", "meta", "openrouter"] if read_only else [backend]
         ),
         read_only=read_only,
         analysis_out=analysis_out,

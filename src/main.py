@@ -120,7 +120,7 @@ class StartRequest(BaseModel):
     project: str = Field(DEFAULT_PROJECT, description="対象プロジェクト名")
     max_iterations: int = Field(20, ge=1, le=50, description="ツール呼び出しループの上限")
     backend: str | None = Field(
-        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
+        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta" / "openrouter"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
     )
     require_approval: bool = Field(
         True, description="write_file / edit_file / run_command の実行前にユーザー承認を求めるか"
@@ -157,7 +157,7 @@ class TaskRequest(BaseModel):
     project: str = Field(DEFAULT_PROJECT, description="対象プロジェクト名")
     max_iterations: int = Field(20, ge=1, le=50, description="ツール呼び出しループの上限")
     backend: str | None = Field(
-        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
+        None, description='"ollama" / "claude" / "openai" / "gemini" / "grok" / "meta" / "openrouter"。省略時は LLM_BACKEND 環境変数(既定 ollama)'
     )
 
 
@@ -537,3 +537,91 @@ def agent_run(req: TaskRequest) -> dict[str, Any]:
         return result
 
     return _handle_backend_errors(_run)
+
+
+# --- セバス指示パッケージの取込み(橋渡し。セバスへは接続・送信しない) ---
+
+
+class SebasIntakeRequest(BaseModel):
+    instruction_json: str = Field(..., min_length=1, description="instruction.json の全文")
+    request_md: str = Field(..., min_length=1, description="REQUEST.md の全文")
+    manifest_json: str = Field(..., min_length=1, description="manifest.json の全文")
+
+
+class SebasPrepareRequest(BaseModel):
+    source_project: str = Field("LOCALSAPORTER", description="コピー元のプロジェクト名(セバスの作業コピー)")
+    start: bool = Field(False, description="作業コピーを作った後、承認つきでセッションを開始するか")
+    backend: str | None = Field(None, description="開始するときのバックエンド(省略時は既定)")
+    max_iterations: int = Field(50, ge=1, le=50)
+
+
+class SebasDeliveryRequest(BaseModel):
+    test_args: list[str] = Field(default_factory=list, description="pytest に渡す引数(空なら全体)")
+    run: bool = Field(True, description="テストを実行するか(false なら未実行として記録)")
+
+
+@app.post("/sebas/intake")
+def sebas_intake(req: SebasIntakeRequest) -> dict[str, Any]:
+    """セバスの指示パッケージを検査し、問題なければ inbox に保存する(作業コピーは作らない)。"""
+    from . import sebas_bridge
+
+    result = sebas_bridge.store_package(
+        WORKSPACE_ROOT, req.instruction_json, req.request_md, req.manifest_json
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=422, detail=result)
+    return result
+
+
+@app.get("/sebas/intake/{proposal_id}")
+def sebas_intake_status(proposal_id: str) -> dict[str, Any]:
+    from . import sebas_bridge
+
+    result = sebas_bridge.load_package(WORKSPACE_ROOT, proposal_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404 if "読めません" in str(result.get("reason")) else 422, detail=result)
+    names = [p.name for p in (PROJECTS_ROOT.glob(f"*__{proposal_id[:12]}")) if p.is_dir()]
+    return {k: result[k] for k in ("ok", "proposal_id", "base_ref", "required_capability_id",
+                                   "manifest_sha256")} | {"workcopies": names}
+
+
+@app.post("/sebas/intake/{proposal_id}/prepare")
+def sebas_intake_prepare(proposal_id: str, req: SebasPrepareRequest) -> dict[str, Any]:
+    """基準版が一致するときだけ、隔離した作業コピーを作る。start=true なら承認つきでセッションも開始する。"""
+    from . import sebas_bridge
+
+    result = sebas_bridge.prepare_workcopy(WORKSPACE_ROOT, req.source_project, proposal_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail=result)
+    if req.start:
+        pkg = sebas_bridge.load_package(WORKSPACE_ROOT, proposal_id)
+        if not pkg.get("ok"):
+            raise HTTPException(status_code=422, detail=pkg)
+
+        def _run():
+            backend, model = _resolve_backend_and_model(req.backend)
+            session = sessions.start_session(
+                task=sebas_bridge.build_task(pkg),
+                backend=backend,
+                model=model,
+                project=result["workcopy"],
+                max_iterations=req.max_iterations,
+                require_approval=True,  # 書込み・実行は人の承認つき(固定)
+            )
+            return sessions.to_public_dict(session)
+
+        result = {**result, "session": _handle_backend_errors(_run)}
+    return result
+
+
+@app.post("/sebas/intake/{proposal_id}/delivery")
+def sebas_intake_delivery(proposal_id: str, req: SebasDeliveryRequest) -> dict[str, Any]:
+    """作業コピーの差分・テスト結果から、セバスの納品データ(delivery)を作る。セバスへは送らない。"""
+    from . import sebas_bridge
+
+    result = sebas_bridge.build_delivery(
+        WORKSPACE_ROOT, proposal_id, test_args=req.test_args, run=req.run
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=422, detail=result)
+    return result

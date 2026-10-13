@@ -17,12 +17,15 @@ DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 DEFAULT_XAI_MODEL = os.environ.get("XAI_MODEL", "grok-4.6")
 # Meta Llama API(OpenAI互換)。モデル名はLlama APIの提供モデルに合わせて.envで変更する。
 DEFAULT_META_MODEL = os.environ.get("LLAMA_MODEL", "Llama-4-Maverick-17B-128E-Instruct-FP8")
+# OpenRouter(OpenAI互換)。既定は匿名ステルスモデルのSpace Bunny Alpha(プレビュー無料、終了の可能性あり)。
+# 自動引き継ぎ(FAILOVER_PRIORITY)には入れない。画面で明示的に選んだときだけ使う。
+DEFAULT_OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "stealth/space-bunny-alpha")
 
 # 自動引き継ぎ(failover)で次に試す際の優先順。現在のバックエンドと、この会話で
 # 既に試して失敗したバックエンドは除外される(sessions.pyの_try_handoff参照)。
-# claudeは最も安定して動く分、他のバックエンドが軒並み失敗したときの最後の
-# 引き継ぎ先として温存する(ユーザー指定により2026-09-11に末尾へ変更)。
-FAILOVER_PRIORITY = ["gemini", "openai", "grok", "ollama", "claude"]
+# ユーザー指定(2026-10-03): Meta > Grok > ChatGPT > Claude の順。gemini/ollamaは使わない。
+# claudeは他が軒並み失敗したときの最後の引き継ぎ先。
+FAILOVER_PRIORITY = ["meta", "grok", "openai", "claude"]
 
 # 各バックエンドが「使える状態か」を判定するためのAPIキー環境変数名。
 API_KEY_ENV = {
@@ -31,6 +34,7 @@ API_KEY_ENV = {
     "gemini": "GEMINI_API_KEY",
     "grok": "XAI_API_KEY",
     "meta": "LLAMA_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 
 
@@ -48,8 +52,10 @@ def resolve_backend_and_model(backend: str | None) -> tuple[str, str]:
         return "grok", DEFAULT_XAI_MODEL
     if selected == "meta":
         return "meta", DEFAULT_META_MODEL
+    if selected == "openrouter":
+        return "openrouter", DEFAULT_OPENROUTER_MODEL
     raise ValueError(
-        f"未知のbackendです: {selected} (ollama, claude, openai, gemini, grok, meta のいずれかを指定してください)"
+        f"未知のbackendです: {selected} (ollama, claude, openai, gemini, grok, meta, openrouter のいずれかを指定してください)"
     )
 
 

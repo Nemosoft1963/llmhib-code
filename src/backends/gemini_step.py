@@ -78,6 +78,10 @@ Docker前提(必ず守ってください):
   エラーの原因仮説と代替案を要約として報告してください。
 """
 
+from ..prompt_rules import COMMON_WORK_RULES  # noqa: E402
+
+SYSTEM_PROMPT += COMMON_WORK_RULES
+
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 TOOLS = as_gemini_tools()
 

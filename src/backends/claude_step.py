@@ -68,6 +68,10 @@ Docker前提(必ず守ってください):
   エラーの原因仮説と代替案を要約として報告してください。
 """
 
+from ..prompt_rules import COMMON_WORK_RULES  # noqa: E402
+
+SYSTEM_PROMPT += COMMON_WORK_RULES
+
 client = anthropic.Anthropic()
 TOOLS = as_anthropic_tools()
 

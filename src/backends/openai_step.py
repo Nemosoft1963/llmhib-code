@@ -74,6 +74,10 @@ Docker前提(必ず守ってください):
   エラーの原因仮説と代替案を要約として報告してください。
 """
 
+from ..prompt_rules import COMMON_WORK_RULES  # noqa: E402
+
+SYSTEM_PROMPT += COMMON_WORK_RULES
+
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 TOOLS = as_openai_tools()
 
