@@ -11,7 +11,7 @@ gitチェックポイントとして自動記録・差分確認・ロールバ�
 (Web検索・SQLite)にも標準で接続しています。
 
 **既定バックエンドはローカルLLM(Ollama + `qwen3:8b`、GPU利用)です。** Claude API
-(`claude-opus-5`)・OpenAI API(既定 `gpt-4o`)・Gemini API(既定 `gemini-3.8-flash`)・
+(既定 `claude-haiku-5-5`、環境変数 `CLAUDE_MODEL` で変更)・OpenAI API(既定 `gpt-4o`)・Gemini API(既定 `gemini-4-argon`)・
 xAI Grok API(既定 `grok-4.6`)にもリクエスト単位で切り替え可能です(モデルはそれぞれ
 `OPENAI_MODEL`/`GEMINI_MODEL`/`XAI_MODEL`で変更可)。Meta Llama API(`"backend": "meta"`、`LLAMA_API_KEY`と`LLAMA_MODEL`を.envに設定)にも
 切り替え可能です(OpenAI互換エンドポイント経由。自動引き継ぎの候補には含めていません)。

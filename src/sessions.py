@@ -28,10 +28,11 @@ import re
 import threading
 import time
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from . import backend_defaults, checkpoints, elaborate as elaborate_mod, mcp_tools, session_store
+from . import backend_defaults, checkpoints, elaborate as elaborate_mod, mcp_tools, model_profiles, session_store
 from .tools_core import DEFAULT_PROJECT, Workspace, get_workspace
 
 logger = logging.getLogger("code_agent.sessions")
@@ -59,6 +60,76 @@ def _iteration_limit(session: "Session") -> int:
     return session.max_iterations
 
 SessionStatus = Literal["running", "waiting_approval", "done", "error"]
+
+
+# --- 作業コピー内の自動承認 (D-2) ---------------------------------------------
+# 人が auto_approve を有効にした、セバス指示の隔離した作業コピーでだけ働く。
+# 許可リスト: 作業コピー内のファイル編集(禁止領域を除く)・pytest・fail-open検査・git の読み取り。
+# 範囲外・判断不能は自動承認しない(従来どおり人の承認待ち)。
+_AUTO_DENY_PREFIXES = (".env", ".git/", ".venv/", "docker-compose", "docker/proxy/", "data/",
+                       "backups/", ".sebas_intake.json")
+_AUTO_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:=\[\],@%+-]+$")
+_AUTO_BAD_CHARS = ("&", "<", ">", "\n", "\r", "`", "$", "|", ";", "(", ")")
+_AUTO_GIT_READ = {"status", "diff", "log", "show"}
+
+
+def _auto_path_ok(raw_path: object) -> tuple[bool, str]:
+    text = str(raw_path or "").replace("\\", "/").strip()
+    if not text or text.startswith("/") or re.match(r"^[A-Za-z]:", text):
+        return False, "パスが作業コピー内の相対パスではありません"
+    parts = [p for p in text.split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." for p in parts):
+        return False, "パスに .. が含まれます"
+    low = "/".join(parts).lower()
+    for prefix in _AUTO_DENY_PREFIXES:
+        if low == prefix.rstrip("/") or low.startswith(prefix):
+            return False, "変更禁止の領域です: " + prefix
+    return True, "作業コピー内のファイル編集"
+
+
+def _auto_command_ok(command: object) -> tuple[bool, str]:
+    import shlex
+
+    text = str(command or "")
+    if not text.strip() or any(c in text for c in _AUTO_BAD_CHARS):
+        return False, "コマンドに許可されない文字があります"
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        return False, "コマンドを解析できません"
+    if not parts or any(not _AUTO_TOKEN_RE.match(t) for t in parts):
+        return False, "コマンドの引数に許可されない文字があります"
+    if any(t.startswith("/") or ".." in t.split("/") for t in parts[1:]):
+        return False, "コマンドの引数が作業コピーの外を指しています"
+    head = parts[0]
+    pythons = ("python", "python3", ".venv/bin/python")
+    if head == "pytest" or (head in pythons and parts[1:3] == ["-m", "pytest"]):
+        return True, "pytest"
+    if head in pythons and len(parts) >= 2 and parts[1] == "scripts/fail_open_lint.py":
+        return True, "fail-open検査"
+    if head == "git" and len(parts) >= 2 and parts[1] in _AUTO_GIT_READ:
+        if any(t.startswith("--output") or t == "-C" or t.startswith("--git-dir")
+               or t.startswith("--work-tree") for t in parts[2:]):
+            return False, "git のオプションが許可されません"
+        return True, "git の読み取り"
+    return False, "許可リストにないコマンドです"
+
+
+def auto_approvable(session: "Session", workspace: Workspace, name: str, args: dict) -> tuple[bool, str]:
+    """(自動承認してよいか, 理由)。判断不能・範囲外は False。"""
+    if not session.auto_approve or session.read_only:
+        return False, ""
+    try:
+        marker = Path(workspace.root) / ".sebas_intake.json"
+        if not marker.is_file():
+            return False, "セバス指示の作業コピーではありません"
+    except OSError:
+        return False, "作業コピーの記録を確認できません"
+    if name in ("write_file", "edit_file"):
+        return _auto_path_ok((args or {}).get("path"))
+    if name == "run_command":
+        return _auto_command_ok((args or {}).get("command"))
+    return False, "自動承認の対象外のツールです"
 
 
 def _tool_needs_approval(name: str) -> bool:
@@ -108,6 +179,15 @@ class Session:
     # 完了時に最終報告を analysis_out(プロジェクト内の相対パス)へ保存する。
     read_only: bool = False
     analysis_out: str | None = None
+    # セバス指示の隔離した作業コピーの中だけで、許可リスト内の操作を自動承認する(人が有効にしたときだけ)。
+    auto_approve: bool = False
+    # 用途別モデル選択。tier が空なら従来どおり(バックエンドの既定モデル)。
+    tier: str = ""
+    tier_reason: str = ""
+    # 自動指定(tier=auto)のときだけ、ツールのエラーが続いたら1段階上のモデルへ上げる(1回まで)。
+    auto_escalate: bool = False
+    escalations: int = 0
+    error_streak: int = 0
 
 
 SESSIONS: dict[str, Session] = {}
@@ -182,6 +262,12 @@ def _session_from_dict(d: dict[str, Any]) -> Session:
         error=d.get("error"),
         created_at=d.get("created_at", time.time()),
         tried_backends=d.get("tried_backends", []),
+        auto_approve=d.get("auto_approve", False),
+        tier=d.get("tier", ""),
+        tier_reason=d.get("tier_reason", ""),
+        auto_escalate=d.get("auto_escalate", False),
+        escalations=d.get("escalations", 0),
+        error_streak=d.get("error_streak", 0),
     )
 
 
@@ -355,7 +441,52 @@ def _finalize_turn(session: Session, workspace: Workspace) -> None:
                 {"type": "checkpoint", "sha": sha, "message": summary[:200]}
             )
 
+    _maybe_escalate_tier(session, results)
     session.current_turn = []
+
+
+# ツールのエラーがこの回数続いたら(自動指定のときだけ)1段階上のモデルへ上げる。
+ESCALATE_AFTER_ERRORS = int(os.environ.get("TIER_ESCALATE_AFTER_ERRORS", "3"))
+
+
+def _maybe_escalate_tier(session: Session, results: list[dict[str, Any]]) -> None:
+    """自動指定のセッションで、ターン内の全ツール結果がエラーの状態が続いたら、
+    同じバックエンドの1段階上のモデルへ切り替える(1セッションにつき1回まで。
+    会話はそのまま引き継ぐ)。切替は transcript に必ず記録する。
+    """
+    if not session.auto_escalate or not session.tier or not results:
+        return
+    if all(str(r.get("content") or "").startswith("エラー") for r in results):
+        session.error_streak += 1
+    else:
+        session.error_streak = 0
+        return
+    if session.error_streak < ESCALATE_AFTER_ERRORS or session.escalations >= 1:
+        return
+    upper = model_profiles.next_tier(session.tier)
+    if upper is None:
+        return
+    new_model, note = model_profiles.resolve_model(session.backend, upper)
+    if new_model == session.model:
+        return
+    old_model, old_tier = session.model, session.tier
+    session.model = new_model
+    session.tier = upper
+    session.escalations += 1
+    session.error_streak = 0
+    session.transcript.append(
+        {
+            "type": "tier_escalation",
+            "backend": session.backend,
+            "from_tier": old_tier,
+            "to_tier": upper,
+            "from_model": old_model,
+            "to_model": new_model,
+            "reason": f"ツールのエラーが{ESCALATE_AFTER_ERRORS}回続いたため",
+            "note": note,
+        }
+    )
+    logger.warning("モデルの段階を上げました: %s -> %s (%s)", old_model, new_model, session.backend)
 
 
 def _run_loop(session: Session) -> None:
@@ -409,10 +540,25 @@ def _run_loop(session: Session) -> None:
         current_turn: list[ToolCall] = []
         for raw in tool_calls_raw:
             needs_approval = session.require_approval and _tool_needs_approval(raw["name"])
+            auto_note = ""
+            if needs_approval:
+                okay, auto_note = auto_approvable(session, workspace, raw["name"], raw["args"])
+                if okay:
+                    needs_approval = False
+                elif session.auto_approve and auto_note:
+                    # 自動承認の範囲外: 従来どおり人の承認待ち。理由を記録する。
+                    session.transcript.append({"type": "auto_approve_declined",
+                                               "name": raw["name"], "reason": auto_note})
+                    auto_note = ""
+                else:
+                    auto_note = ""
             call = ToolCall(
                 id=raw["id"], name=raw["name"], args=raw["args"], needs_approval=needs_approval
             )
             current_turn.append(call)
+            if auto_note and not needs_approval:
+                session.transcript.append({"type": "auto_approved", "name": raw["name"],
+                                           "reason": auto_note})
             session.transcript.append(
                 {
                     "type": "tool_use",
@@ -579,6 +725,8 @@ def _try_handoff(session: Session, reason: str) -> bool:
 
         old_backend, old_model = session.backend, session.model
         _, new_model = backend_defaults.resolve_backend_and_model(candidate)
+        if session.tier:
+            new_model, _tier_note = model_profiles.resolve_model(candidate, session.tier)
         context = _build_context_summary(session, exclude_last=False)
         handoff_task = (
             "これまでの作業の続きです。以下の内容を踏まえて、この時点から実装を"
@@ -661,6 +809,10 @@ def start_session(
     background: bool = True,
     read_only: bool = False,
     analysis_out: str | None = None,
+    tier: str = "",
+    tier_reason: str = "",
+    auto_escalate: bool = False,
+    auto_approve: bool = False,
 ) -> Session:
     """新しいセッションを開始する。
 
@@ -688,7 +840,16 @@ def start_session(
         ),
         read_only=read_only,
         analysis_out=analysis_out,
+        tier=tier,
+        tier_reason=tier_reason,
+        auto_escalate=auto_escalate,
+        auto_approve=bool(auto_approve) and not read_only,
     )
+    if tier:
+        session.transcript.append(
+            {"type": "tier_selected", "tier": tier, "model": model, "reason": tier_reason,
+             "auto_escalate": bool(auto_escalate)}
+        )
     session.transcript.append({"type": "user_message", "text": task})
     SESSIONS[session.id] = session
     _persist(session)  # running状態を即座に保存(ポーリングですぐ見えるように)
@@ -796,6 +957,7 @@ def to_public_dict(session: Session) -> dict[str, Any]:
         "project": session.project,
         "backend": session.backend,
         "model": session.model,
+        "tier": session.tier,
         "elaborate": session.elaborate,
         "status": session.status,
         "iterations": session.iterations,

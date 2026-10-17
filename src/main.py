@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse
 from google.genai import errors as genai_errors
 from pydantic import BaseModel, Field
 
-from . import analysis, backend_defaults, checkpoints, deploy, importer, mcp_tools, sessions, triz_inputs, writeback
+from . import analysis, backend_defaults, checkpoints, deploy, importer, mcp_tools, model_profiles, sessions, triz_inputs, writeback
 from .tools_core import DEFAULT_PROJECT, PROJECTS_ROOT, WORKSPACE_ROOT
 from .tools_core import get_project_meta as _get_project_meta
 from .tools_core import get_workspace as _get_workspace
@@ -124,6 +124,20 @@ class StartRequest(BaseModel):
     )
     require_approval: bool = Field(
         True, description="write_file / edit_file / run_command の実行前にユーザー承認を求めるか"
+    )
+    model: str | None = Field(
+        None,
+        description=(
+            "モデル名を直接指定する(例: ollamaの qwen3-coder:30b)。省略時はbackend既定。"
+            "tier が同時にある場合は model を優先する。英数字と . _ : / - のみ、100字以内"
+        ),
+    )
+    tier: str | None = Field(
+        None,
+        description=(
+            '用途に応じたモデルの段階: "light" / "standard" / "heavy" / "auto"(依頼文から自動判定し、'
+            "ツールのエラーが続いたら1段階上げる)。省略時は従来どおりバックエンドの既定モデル"
+        ),
     )
     elaborate: bool = Field(
         False,
@@ -404,12 +418,30 @@ def file_content(path: str, project: str = DEFAULT_PROJECT) -> dict:
 # --- セッションAPI(承認フロー) ---
 
 
+@app.get("/model-profiles")
+def model_profiles_get() -> dict[str, Any]:
+    """用途別モデルの対応表(読み取り専用)。警告があれば併せて返す。"""
+    table, warnings = model_profiles.load_table()
+    return {"tiers": list(model_profiles.TIERS), "table": table, "warnings": warnings}
+
+
 @app.post("/agent/start")
 def agent_start(req: StartRequest) -> dict[str, Any]:
     """新しいタスクセッションを開始する。承認待ちになるか完了するまで進める。"""
 
     def _run():
         backend, model = _resolve_backend_and_model(req.backend)
+        tier, tier_reason = model_profiles.resolve_tier_request(req.tier, req.task)
+        if tier:
+            model, note = model_profiles.resolve_model(backend, tier)
+            if note:
+                tier_reason = f"{tier_reason} / {note}"
+        if req.model is not None and str(req.model).strip():
+            requested_model = str(req.model).strip()
+            if not model_profiles.is_valid_model_name(requested_model):
+                raise ValueError("model の形式が不正です(英数字と . _ : / - のみ、100字以内)")
+            model = requested_model
+            tier, tier_reason = "", ""  # モデルを直接指定した場合は、用途段階の自動切替は使わない
         session = sessions.start_session(
             task=req.task,
             backend=backend,
@@ -418,6 +450,9 @@ def agent_start(req: StartRequest) -> dict[str, Any]:
             max_iterations=req.max_iterations,
             require_approval=req.require_approval,
             elaborate=req.elaborate,
+            tier=tier,
+            tier_reason=tier_reason,
+            auto_escalate=bool(tier) and str(req.tier).strip().lower() == model_profiles.AUTO,
         )
         return sessions.to_public_dict(session)
 
@@ -553,6 +588,13 @@ class SebasPrepareRequest(BaseModel):
     start: bool = Field(False, description="作業コピーを作った後、承認つきでセッションを開始するか")
     backend: str | None = Field(None, description="開始するときのバックエンド(省略時は既定)")
     max_iterations: int = Field(50, ge=1, le=50)
+    auto_approve: bool = Field(
+        False,
+        description=(
+            "作業コピーの中だけで、許可リスト(編集・pytest・fail-open検査・gitの読み取り)を自動承認するか。"
+            "範囲外の操作は従来どおり人の承認待ち。既定はfalse(人が有効にしたときだけ)"
+        ),
+    )
 
 
 class SebasDeliveryRequest(BaseModel):
@@ -606,7 +648,8 @@ def sebas_intake_prepare(proposal_id: str, req: SebasPrepareRequest) -> dict[str
                 model=model,
                 project=result["workcopy"],
                 max_iterations=req.max_iterations,
-                require_approval=True,  # 書込み・実行は人の承認つき(固定)
+                require_approval=True,  # 書込み・実行は人の承認つき(自動承認は範囲内だけ)
+                auto_approve=bool(req.auto_approve),
             )
             return sessions.to_public_dict(session)
 

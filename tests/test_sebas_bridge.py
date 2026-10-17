@@ -49,6 +49,10 @@ def _make_source(root: Path, project="架空本体"):
     (src / "tests" / "test_a.py").write_text(
         "from app import a\n\n\ndef test_a():\n    assert a.VALUE == 1\n", encoding="utf-8")
     (src / ".env").write_text("SECRET_TOKEN=dummy-not-real\n", encoding="utf-8")
+    (src / ".env.local").write_text("SECRET_TOKEN=dummy-local\n", encoding="utf-8")
+    (src / ".env.example").write_text("SECRET_TOKEN=\n", encoding="utf-8")
+    (src / "inputs").mkdir()
+    (src / "inputs" / "sample.json").write_text("{}", encoding="utf-8")
     (src / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     (src / "data").mkdir()
     (src / "data" / "x.sqlite3").write_text("dummy", encoding="utf-8")
@@ -149,6 +153,10 @@ def test_prepare_never_copies_secrets_and_is_idempotent(tmp_path):
     work = tmp_path / "projects" / res["workcopy"]
     assert (work / "app" / "a.py").exists()
     assert not (work / ".env").exists()
+    assert not (work / ".env.local").exists()
+    # 秘密を含まない雛形と、テストが読む入力データは入れる
+    assert (work / ".env.example").read_text(encoding="utf-8") == "SECRET_TOKEN=\n"
+    assert (work / "inputs" / "sample.json").exists()
     assert not (work / "data").exists()
     assert not list(work.rglob("*.sqlite3"))
     info = json.loads((work / ".sebas_intake.json").read_text(encoding="utf-8"))
@@ -209,13 +217,13 @@ def test_run_tests_real_pytest_and_summary_parsing(tmp_path):
     prepared = sb.prepare_workcopy(tmp_path, "架空本体", PID)
     work = tmp_path / "projects" / prepared["workcopy"]
     (work / "app" / "c.py").write_text("NEW = 3\n", encoding="utf-8")
-    res = sb.build_delivery(tmp_path, PID, test_args=["tests/test_a.py"], run=True)
+    res = sb.build_delivery(tmp_path, PID, test_args=["tests/test_a.py"], run=True, gate=False)  # gate=False: run_testsの部分実行だけを検査する(納品ゲートは別テスト)
     assert res["ok"] is True
     tests = res["delivery"]["test_results"]
     assert tests["total"] == 1 and tests["failed"] == 0 and tests["passed"] is True
     # 失敗するテストは passed=False、failure_tail が付く
     (work / "tests" / "test_b.py").write_text("def test_b():\n    assert False\n", encoding="utf-8")
-    res2 = sb.build_delivery(tmp_path, PID, test_args=["tests/test_b.py"], run=True)
+    res2 = sb.build_delivery(tmp_path, PID, test_args=["tests/test_b.py"], run=True, gate=False)
     assert res2["ok"] is True
     t2 = res2["delivery"]["test_results"]
     assert t2["passed"] is False and t2["failed"] == 1 and t2["failure_tail"]
@@ -237,3 +245,103 @@ def test_no_network_or_credentials_code():
         assert needle not in text
     assert "import subprocess" in text   # git / pytest の実行だけ
     assert subprocess is not None
+
+
+# ---- 納品ゲート (D-3) -------------------------------------------------------
+
+FIXTURE_LINT = Path(__file__).resolve().parent / "fixtures" / "fail_open_lint_sample.py"
+
+
+def _gate_workcopy(tmp_path, with_lint=True):
+    src = _make_source(tmp_path)
+    if with_lint:
+        (src / "scripts").mkdir()
+        (src / "scripts" / "fail_open_lint.py").write_text(
+            FIXTURE_LINT.read_text(encoding="utf-8"), encoding="utf-8")
+        (src / "tests" / "fail_open_baseline.json").write_text(
+            json.dumps({"findings": [], "total": 0, "high_risk_count": 0}), encoding="utf-8")
+    _store(tmp_path, sb.base_ref_of(src))
+    prepared = sb.prepare_workcopy(tmp_path, "架空本体", PID)
+    return tmp_path / "projects" / prepared["workcopy"]
+
+
+def _fake_runner(results):
+    calls = []
+
+    def runner(work, args, seed="0"):
+        calls.append(seed)
+        return dict(results.get(seed) or results["0"])
+    runner.calls = calls
+    return runner
+
+
+_OK = {"passed": True, "total": 5, "failed": 0, "summary_line": "5 passed in 1s"}
+
+
+def test_gate_passes_with_clean_diff_and_stable_reruns(tmp_path):
+    work = _gate_workcopy(tmp_path)
+    (work / "app" / "c.py").write_text("NEW = 3\n", encoding="utf-8")
+    (work / "tests" / "test_c.py").write_text("def test_c():\n    assert True\n", encoding="utf-8")
+    runner = _fake_runner({"0": _OK})
+    report = sb.run_delivery_gate(work, ["app/c.py", "tests/test_c.py"], run_tests_fn=runner)
+    assert report["passed"] is True, report
+    assert runner.calls == ["0", "3", "8"]
+
+
+def test_gate_rejects_new_fail_open_in_diff(tmp_path):
+    work = _gate_workcopy(tmp_path)
+    (work / "app" / "bad.py").write_text(
+        "def f():\n    try:\n        return 1\n    except Exception:\n        pass\n", encoding="utf-8")
+    report = sb.run_delivery_gate(work, ["app/bad.py", "tests/test_x.py"], run_tests_fn=_fake_runner({"0": _OK}))
+    assert report["passed"] is False
+    lint = next(c for c in report["checks"] if c["name"] == "fail_open_lint")
+    assert lint["passed"] is False and "bad.py" in lint["detail"]
+
+
+def test_gate_lint_missing_script_is_failure_not_pass(tmp_path):
+    work = _gate_workcopy(tmp_path, with_lint=False)
+    (work / "app" / "c.py").write_text("NEW = 3\n", encoding="utf-8")
+    report = sb.run_delivery_gate(work, ["app/c.py", "tests/test_c.py"], run_tests_fn=_fake_runner({"0": _OK}))
+    lint = next(c for c in report["checks"] if c["name"] == "fail_open_lint")
+    assert lint["passed"] is False and report["passed"] is False
+
+
+def test_gate_rejects_failing_or_unreadable_tests_and_seed_dependent_failure(tmp_path):
+    work = _gate_workcopy(tmp_path)
+    changed = ["app/c.py", "tests/test_c.py"]
+    (work / "app" / "c.py").write_text("NEW = 3\n", encoding="utf-8")
+    # 全体テストの失敗
+    r = sb.run_delivery_gate(work, changed, run_tests_fn=_fake_runner(
+        {"0": {"passed": False, "total": 5, "failed": 1, "summary_line": "1 failed"}}))
+    assert r["passed"] is False
+    # 結果を読めない(total=0)は不合格
+    r = sb.run_delivery_gate(work, changed, run_tests_fn=_fake_runner({"0": {"total": 0, "failed": 0}}))
+    assert r["passed"] is False
+    # ハッシュ順序を変えたときだけ失敗
+    r = sb.run_delivery_gate(work, changed, run_tests_fn=_fake_runner(
+        {"0": _OK, "8": {"passed": False, "total": 5, "failed": 1, "summary_line": "1 failed"}}))
+    assert r["passed"] is False
+    assert any(c["name"] == "rerun_hashseed_8" and not c["passed"] for c in r["checks"])
+    # 件数が変わる(収集の欠落)も不合格
+    r = sb.run_delivery_gate(work, changed, run_tests_fn=_fake_runner(
+        {"0": _OK, "3": {"passed": True, "total": 4, "failed": 0, "summary_line": "4 passed"}}))
+    assert r["passed"] is False
+
+
+def test_gate_requires_tests_with_code_and_limits_size(tmp_path):
+    work = _gate_workcopy(tmp_path)
+    r = sb.run_delivery_gate(work, ["app/c.py"], run_tests_fn=_fake_runner({"0": _OK}))
+    assert next(c for c in r["checks"] if c["name"] == "tests_accompany_code")["passed"] is False
+    many = [f"docs/d{i}.md" for i in range(sb.MAX_CHANGED_FILES + 1)]
+    r = sb.run_delivery_gate(work, many, run_tests_fn=_fake_runner({"0": _OK}))
+    assert next(c for c in r["checks"] if c["name"] == "changed_files_count")["passed"] is False
+
+
+def test_build_delivery_refuses_when_gate_fails_and_has_no_delivery(tmp_path, monkeypatch):
+    work = _gate_workcopy(tmp_path)
+    (work / "app" / "c.py").write_text("NEW = 3\n", encoding="utf-8")
+    monkeypatch.setattr(sb, "run_tests", _fake_runner(
+        {"0": {"passed": False, "total": 5, "failed": 2, "summary_line": "2 failed"}}))
+    res = sb.build_delivery(tmp_path, PID)
+    assert res["ok"] is False and "ゲート" in res["reason"]
+    assert "delivery" not in res and any(not c["passed"] for c in res["gate"])

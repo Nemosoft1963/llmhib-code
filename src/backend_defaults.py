@@ -10,19 +10,19 @@ from __future__ import annotations
 import os
 
 DEFAULT_BACKEND = os.environ.get("LLM_BACKEND", "ollama")
-DEFAULT_CLAUDE_MODEL = "claude-opus-5"
+DEFAULT_CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-5-5")
 DEFAULT_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
 DEFAULT_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
-DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+DEFAULT_GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-4-argon")
 DEFAULT_XAI_MODEL = os.environ.get("XAI_MODEL", "grok-4.6")
 # Meta Llama API(OpenAI互換)。モデル名はLlama APIの提供モデルに合わせて.envで変更する。
 DEFAULT_META_MODEL = os.environ.get("LLAMA_MODEL", "Llama-4-Maverick-17B-128E-Instruct-FP8")
 
 # 自動引き継ぎ(failover)で次に試す際の優先順。現在のバックエンドと、この会話で
 # 既に試して失敗したバックエンドは除外される(sessions.pyの_try_handoff参照)。
-# ユーザー指定(2026-10-03): Meta > Grok > ChatGPT > Claude の順。gemini/ollamaは使わない。
+# ユーザー指定(2026-10-15): Meta > ChatGPT > Claude > Gemini > Grok の順(Grokは最後)。ollamaは使わない。
 # claudeは他が軒並み失敗したときの最後の引き継ぎ先。
-FAILOVER_PRIORITY = ["meta", "grok", "openai", "claude"]
+FAILOVER_PRIORITY = ["meta", "openai", "claude", "gemini", "grok"]
 
 # 各バックエンドが「使える状態か」を判定するためのAPIキー環境変数名。
 API_KEY_ENV = {

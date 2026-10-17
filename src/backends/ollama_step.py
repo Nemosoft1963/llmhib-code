@@ -83,6 +83,20 @@ from ..prompt_rules import COMMON_WORK_RULES  # noqa: E402
 SYSTEM_PROMPT += COMMON_WORK_RULES
 
 client = ollama.Client(host=OLLAMA_BASE_URL, timeout=REQUEST_TIMEOUT_SEC)
+# コンテキスト長(トークン)。未設定ならOllama側の既定(4096)のまま。システムプロンプトとツール定義だけで
+# 数千トークンを使うため、エージェント用途では環境変数 OLLAMA_NUM_CTX で広げる(例: 16384)。
+# 数値以外・範囲外は無視せず起動時に気づけるよう警告し、既定のままにする。
+_NUM_CTX_RAW = os.environ.get("OLLAMA_NUM_CTX", "").strip()
+NUM_CTX: int | None = None
+if _NUM_CTX_RAW:
+    try:
+        _n = int(_NUM_CTX_RAW)
+        if 2048 <= _n <= 262144:
+            NUM_CTX = _n
+        else:
+            logging.getLogger("code_agent.ollama").warning("OLLAMA_NUM_CTX が範囲外のため無視します: %s", _NUM_CTX_RAW)
+    except ValueError:
+        logging.getLogger("code_agent.ollama").warning("OLLAMA_NUM_CTX が数値ではないため無視します")
 TOOLS = as_ollama_tools()
 
 
@@ -114,7 +128,10 @@ def call_model(
     メッセージ群は常にlist(他バックエンドとインターフェースを揃えるため)。
     tool_calls は [{"id":..., "name":..., "args": {...}}, ...] の共通形式。
     """
-    response = client.chat(model=model, messages=messages, tools=TOOLS)
+    if NUM_CTX is not None:
+        response = client.chat(model=model, messages=messages, tools=TOOLS, options={"num_ctx": NUM_CTX})
+    else:
+        response = client.chat(model=model, messages=messages, tools=TOOLS)
     message = _attr(response, "message")
     content = _attr(message, "content", "") or ""
     raw_tool_calls = _attr(message, "tool_calls") or []

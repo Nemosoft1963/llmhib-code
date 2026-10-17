@@ -40,8 +40,11 @@ REQUIRED_FORBIDDEN_MARKERS = (".env", "/data", "docker-compose", "docker/proxy",
 COPY_EXCLUDE_NAMES = {
     ".env", ".git", ".venv", "__pycache__", ".pytest_cache", "node_modules",
     "data", "backups", "logs", ".codex_update_backups", ".jenkins_backup",
-    "workspace", "temp", "experience_memory", "experience_lessons", "inputs",
+    "workspace", "temp", "experience_memory", "experience_lessons",
 }
+# 例外として作業コピーに入れる環境の見本(秘密を含まない。リポジトリに含まれる雛形)。
+# 実際の .env や .env.local などは入れない。納品の差分でこれらを変更すると禁止領域として拒否される。
+COPY_ALLOW_ENV_NAMES = {".env.example"}
 COPY_EXCLUDE_SUFFIXES = (".pyc", ".sqlite3", ".db", ".db-wal", ".db-shm")
 
 MAX_FILE_BYTES = 2_000_000
@@ -224,7 +227,7 @@ def _copy_filtered(src: Path, dst: Path) -> int:
         for name in filenames:
             if name in COPY_EXCLUDE_NAMES or name.endswith(COPY_EXCLUDE_SUFFIXES):
                 continue
-            if name.startswith(".env"):
+            if name.startswith(".env") and name not in COPY_ALLOW_ENV_NAMES:
                 continue
             source = Path(dirpath) / name
             if source.is_symlink():
@@ -344,12 +347,12 @@ def parse_pytest_summary(output: str) -> dict:
             "summary_line": last[:200]}
 
 
-def run_tests(workcopy_dir: Path, test_args: list[str]) -> dict:
+def run_tests(workcopy_dir: Path, test_args: list[str], seed: str = "0") -> dict:
     py = workcopy_dir / ".venv" / "bin" / "python"
     exe = str(py) if py.exists() else "python"
     cmd = [exe, "-m", "pytest", "-q", "-p", "no:cacheprovider", *test_args]
     env = dict(os.environ)
-    env["PYTHONHASHSEED"] = "0"
+    env["PYTHONHASHSEED"] = str(seed)
     try:
         proc = subprocess.run(cmd, cwd=str(workcopy_dir), capture_output=True, text=True,
                               timeout=TEST_TIMEOUT_SEC, env=env)
@@ -365,8 +368,79 @@ def run_tests(workcopy_dir: Path, test_args: list[str]) -> dict:
     return parsed
 
 
+# --- 納品ゲート (D-3) ---------------------------------------------------------
+# 納品の前に必ず通す: (a) fail-open検査を差分に適用 (b) 全体テスト (c) ハッシュ順序を
+# 変えた再実行 (d) 変更禁止領域・差分の大きさ・テストの有無。1つでも通らない・確認できない
+# なら納品しない (不明は不合格)。
+GATE_RERUN_SEEDS = ("3", "8")
+MAX_CHANGED_FILES = 80
+
+
+def _gate_check(name: str, passed: bool, detail: str) -> dict:
+    return {"name": name, "passed": bool(passed), "detail": str(detail)[:400]}
+
+
+def _gate_lint(work: Path, changed: list[str]) -> dict:
+    """作業コピー自身の scripts/fail_open_lint.py を差分に適用する。無い・読めない=不合格。"""
+    script = work / "scripts" / "fail_open_lint.py"
+    if not script.is_file():
+        return _gate_check("fail_open_lint", False, "検査スクリプトが作業コピーにありません(確認できず)")
+    py = work / ".venv" / "bin" / "python"
+    exe = str(py) if py.exists() else "python"
+    targets = [n for n in changed if n.endswith((".py", ".js"))]
+    if not targets:
+        return _gate_check("fail_open_lint", True, "検査対象(.py/.js)の変更なし")
+    try:
+        proc = subprocess.run([exe, "scripts/fail_open_lint.py", "--json", "--changed", *targets],
+                              cwd=str(work), capture_output=True, text=True, timeout=300)
+        found = json.loads(proc.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return _gate_check("fail_open_lint", False, f"検査を実行できません: {type(exc).__name__}")
+    if proc.returncode != 0 or not isinstance(found, list):
+        return _gate_check("fail_open_lint", False, "検査の結果を読めません(確認できず)")
+    if found:
+        sample = "; ".join(f"{x.get('file')}:{x.get('function')}[{x.get('type')}]" for x in found[:5])
+        return _gate_check("fail_open_lint", False, f"新しいfail-openの検出が{len(found)}件: {sample}")
+    return _gate_check("fail_open_lint", True, "新しい検出なし")
+
+
+def run_delivery_gate(work: Path, changed: list[str], *, run_tests_fn=None) -> dict:
+    """納品ゲートを実行し {passed, checks, tests} を返す。run_tests_fn はテスト用の差し替え。"""
+    runner = run_tests_fn or run_tests
+    checks: list[dict] = []
+    checks.append(_gate_check(
+        "changed_files_count", len(changed) <= MAX_CHANGED_FILES,
+        f"変更ファイル{len(changed)}件(上限{MAX_CHANGED_FILES})"))
+    code_changed = [n for n in changed if n.startswith("app/") and n.endswith(".py")]
+    tests_changed = [n for n in changed if n.startswith("tests/")]
+    checks.append(_gate_check(
+        "tests_accompany_code", not code_changed or bool(tests_changed),
+        "コードの変更にテストの追加・更新が伴っています" if (not code_changed or tests_changed)
+        else f"app/ のコード{len(code_changed)}件の変更に、tests/ の変更がありません"))
+    checks.append(_gate_lint(work, changed))
+    first = runner(work, [], seed="0")
+    first_ok = bool(first.get("passed")) and int(first.get("total") or 0) > 0         and int(first.get("failed") or 0) == 0
+    checks.append(_gate_check(
+        "full_tests", first_ok,
+        f"全体テスト {first.get('summary_line') or first.get('error') or '結果を読めません'}"))
+    reruns_ok = first_ok
+    for seed in GATE_RERUN_SEEDS:
+        if not first_ok:
+            break
+        again = runner(work, [], seed=seed)
+        ok = bool(again.get("passed")) and int(again.get("total") or 0) == int(first.get("total") or 0)             and int(again.get("failed") or 0) == 0
+        reruns_ok = reruns_ok and ok
+        checks.append(_gate_check(
+            f"rerun_hashseed_{seed}", ok,
+            f"PYTHONHASHSEED={seed}: {again.get('summary_line') or again.get('error') or '結果を読めません'}"))
+    if not first_ok:
+        checks.append(_gate_check("rerun_hashseed", False, "全体テストが通らないため再実行しません"))
+    passed = all(c["passed"] for c in checks) and reruns_ok
+    return {"passed": bool(passed), "checks": checks, "tests": first}
+
+
 def build_delivery(workspace_root: str | Path, proposal_id: str, *, test_args: list[str] | None = None,
-                   run: bool = True) -> dict:
+                   run: bool = True, gate: bool = True) -> dict:
     """作業コピーの差分とテスト結果から、セバスの record_delivery 用の delivery を作る。
 
     base_commit にはセバスが比較する基準版(base_ref)を入れる。result_commit は作業コピーの
@@ -415,7 +489,15 @@ def build_delivery(workspace_root: str | Path, proposal_id: str, *, test_args: l
     if commit.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", result_commit):
         return _fail("成果コミットを作成できません", workcopy=work.name)
     artifact_sha256 = _sha256_bytes(canonical_artifact_bytes(diff_text))
-    if run:
+    gate_report = None
+    if gate and run:
+        # D-3: 納品ゲート。通らなければ納品データを作らない(不明は不合格)。
+        gate_report = run_delivery_gate(work, changed)
+        tests = gate_report["tests"]
+        if not gate_report["passed"]:
+            return _fail("納品ゲートを通りません(納品しません)", workcopy=work.name,
+                         gate=gate_report["checks"], changed_files=changed[:200])
+    elif run:
         tests = run_tests(work, list(test_args or []))
     else:
         tests = {"total": 0, "failed": 0, "note": "テスト未実行(run=false)"}
@@ -431,4 +513,5 @@ def build_delivery(workspace_root: str | Path, proposal_id: str, *, test_args: l
     }
     return {"ok": True, "delivery": delivery, "workcopy": work.name, "changed_files": changed[:200],
             "artifact_sha256": artifact_sha256,
+            "gate": (gate_report["checks"] if gate_report else None),
             "tests_passed": bool(tests.get("passed"))}
