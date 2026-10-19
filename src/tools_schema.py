@@ -96,6 +96,41 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["command"],
         },
     },
+    {
+        "name": "analyze_structure",
+        "description": (
+            "プロジェクトの構造の要約(モジュール数、ルート数、テスト数、"
+            "complete、parse_errors)を返します。module引数で特定モジュール"
+            "(例: app.foo または app/foo.py)の詳細も返せます。読み取り専用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "module": {
+                    "type": "string",
+                    "description": "詳細を知りたいモジュール(例: app.foo または app/foo.py)。省略時は全体の要約。",
+                }
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "analyze_impact",
+        "description": (
+            "指定したモジュール/関数への変更の影響範囲(依存元・呼び出し元・"
+            "テスト・ルート・画面JS)を返します。読み取り専用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "ファイルパス(例: app/foo.py)またはモジュール.関数名(例: app.foo.func)。",
+                }
+            },
+            "required": ["target"],
+        },
+    },
 ]
 
 

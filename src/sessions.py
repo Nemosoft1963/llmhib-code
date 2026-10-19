@@ -37,7 +37,8 @@ from .tools_core import DEFAULT_PROJECT, Workspace, get_workspace
 
 logger = logging.getLogger("code_agent.sessions")
 
-BUILTIN_TOOL_NAMES = {"read_file", "write_file", "edit_file", "list_directory", "run_command"}
+BUILTIN_TOOL_NAMES = {"read_file", "write_file", "edit_file", "list_directory", "run_command",
+                        "analyze_structure", "analyze_impact"}
 
 # 副作用があり、承認が必要な組み込みツール
 BUILTIN_APPROVAL_REQUIRED_TOOLS = {"write_file", "edit_file", "run_command"}
@@ -338,7 +339,7 @@ def _remaining_scratch_files(session: Session, workspace: Workspace) -> list[str
     return out
 
 
-READ_ONLY_TOOLS = {"read_file", "list_directory"}
+READ_ONLY_TOOLS = {"read_file", "list_directory", "analyze_structure", "analyze_impact"}
 
 
 def _execute(
@@ -347,7 +348,8 @@ def _execute(
     if read_only and name not in READ_ONLY_TOOLS:
         return (
             f"エラー: 調査モード(読み取り専用)のため {name} は実行できません。"
-            "read_file と list_directory だけを使って調査し、結果は最終報告としてテキストで出力してください。"
+            "read_file / list_directory / analyze_structure / analyze_impact "
+            "だけを使って調査し、結果は最終報告としてテキストで出力してください。"
         )
     if mcp_tools.is_mcp_tool(name):
         return mcp_tools.call_tool(name, args)

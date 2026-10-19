@@ -16,6 +16,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from . import code_analysis
+
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/app/workspace")).resolve()
 PROJECTS_ROOT = WORKSPACE_ROOT / "projects"
 # 注意: ここで PROJECTS_ROOT を作成しない。main.py の起動時マイグレーションが
@@ -50,6 +52,10 @@ ALLOWED_COMMANDS = {
     "ls",
     "mkdir",
 }
+
+# analyze_* ツールの出力上限(各リストの件数)。超えたら切り捨て、
+# truncated: true と件数で明示する。
+ANALYZE_LIST_LIMIT = 200
 
 # シェル演算子(これらを含むコマンドは拒否する)
 FORBIDDEN_OPERATORS = ("&&", "||", "|", ";", "`", "$(")
@@ -259,6 +265,84 @@ class Workspace:
         if not entries:
             return "(空のディレクトリ)"
         return "\n".join(f"{p.name}/" if p.is_dir() else p.name for p in entries)
+
+    # --- 読み取り専用のコード解析ツール --------------------------------------
+    # 解析自体は code_analysis が行い(対象ファイルを変更しない)、ここでは
+    # プロジェクトルート外を読まないこと(_resolve と同じ検証)と出力上限だけを担う。
+
+    def _truncate_lists(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """各リストを ANALYZE_LIST_LIMIT 件で切り、切ったことを明示する。"""
+        out: dict[str, Any] = dict(payload)
+        counts: dict[str, int] = {}
+        truncated = False
+        for key, value in list(out.items()):
+            if isinstance(value, list) and len(value) > ANALYZE_LIST_LIMIT:
+                counts[key] = len(value)
+                out[key] = value[:ANALYZE_LIST_LIMIT]
+                truncated = True
+        out["truncated"] = truncated
+        if counts:
+            out["truncated_counts"] = counts
+            out["list_limit"] = ANALYZE_LIST_LIMIT
+        return out
+
+    def analyze_structure(self, module: str = "") -> str:
+        """プロジェクトの構造の要約を返す(読み取り専用)。
+
+        module省略時: モジュール数・ルート数・テスト数・complete・
+        parse_errors の要約。module指定時: そのモジュールの詳細。
+        プロジェクトのルート外は読まない(パス検証は _resolve と同じ)。
+        """
+        try:
+            index = code_analysis.build_index(self.root)
+        except Exception as e:
+            return f"エラー: 解析中に例外が発生しました: {e}"
+        if not module:
+            summary = {
+                "module_count": len(index["modules"]),
+                "modules": sorted(m["name"] for m in index["modules"]),
+                "route_count": len(index["routes"]),
+                "test_count": len(index["tests"]),
+                "complete": index["complete"],
+                "parse_errors": index["parse_errors"],
+                "unresolved_imports": index["unresolved_imports"],
+            }
+            return json.dumps(
+                self._truncate_lists(summary), ensure_ascii=False, indent=2)
+        resolved, reason = code_analysis._resolve_target(index, module)
+        if resolved is None:
+            return json.dumps(
+                {"found": False, "module": module, "reason": reason},
+                ensure_ascii=False, indent=2)
+        entry = next(
+            (m for m in index["modules"] if m["name"] == resolved["module"]), None)
+        if entry is None:
+            return json.dumps(
+                {"found": False, "module": module, "reason": "module not in index"},
+                ensure_ascii=False, indent=2)
+        detail = {
+            "found": True,
+            "module": entry,
+            "route_count": sum(
+                1 for r in index["routes"] if r["module"] == entry["name"]),
+            "routes": [r for r in index["routes"] if r["module"] == entry["name"]],
+            "complete": index["complete"],
+        }
+        return json.dumps(
+            self._truncate_lists(detail), ensure_ascii=False, indent=2)
+
+    def analyze_impact(self, target: str) -> str:
+        """targetへの変更の影響範囲を返す(読み取り専用、プロジェクト外は読まない)。"""
+        try:
+            index = code_analysis.build_index(self.root)
+        except Exception as e:
+            return f"エラー: 解析中に例外が発生しました: {e}"
+        try:
+            result = code_analysis.impact(index, target)
+        except Exception as e:
+            return f"エラー: 解析中に例外が発生しました: {e}"
+        return json.dumps(
+            self._truncate_lists(result), ensure_ascii=False, indent=2)
 
     def run_command(self, command: str) -> str:
         """プロジェクト内で、許可されたコマンドのみを実行する。
