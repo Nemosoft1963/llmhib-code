@@ -58,4 +58,4 @@ def is_backend_available(name: str) -> bool:
     if name == "ollama":
         return True
     env_name = API_KEY_ENV.get(name)
-    return bool(env_name and os.environ.get(env_name))
+    return bool(env_name and os.environ.get(env_name, "").strip())
